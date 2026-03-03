@@ -1064,9 +1064,11 @@
                                 </button>
                             </div>
 
-                            {/* Corner Labels (Subject perfectly centered) */}
-                            <div className="absolute top-5 left-5 text-xs font-mono text-zinc-500 dark:text-zinc-500">{currentIndex + 1}</div>
-                            <div className="absolute top-5 left-1/2 -translate-x-1/2 text-xs font-mono text-zinc-500 dark:text-zinc-500 font-bold">{subjectLabel}</div>
+                            {/* Corner Labels */}
+                            <div className="absolute top-5 left-5 flex items-center gap-2">
+                                <span className="text-xs font-mono text-zinc-500 dark:text-zinc-500">{currentIndex + 1}</span>
+                                <span className="text-xs font-mono text-zinc-500 dark:text-zinc-500 font-bold">{subjectLabel}</span>
+                            </div>
                             <div className="absolute bottom-5 left-5 text-xs font-mono text-zinc-500 dark:text-zinc-500">{docLabel}</div>
                             <div className="absolute bottom-5 right-5 text-xs font-mono text-zinc-500 dark:text-zinc-500">{currentCard.sec}</div>
                             
@@ -1119,9 +1121,11 @@
                                 </button>
                             </div>
 
-                            {/* Corner Labels (Subject perfectly centered) */}
-                            <div className="absolute top-5 left-5 text-xs font-mono text-zinc-500 dark:text-zinc-400">{currentIndex + 1}</div>
-                            <div className="absolute top-5 left-1/2 -translate-x-1/2 text-xs font-mono text-zinc-500 dark:text-zinc-400 font-bold">{subjectLabel}</div>
+                            {/* Corner Labels */}
+                            <div className="absolute top-5 left-5 flex items-center gap-2">
+                                <span className="text-xs font-mono text-zinc-500 dark:text-zinc-400">{currentIndex + 1}</span>
+                                <span className="text-xs font-mono text-zinc-500 dark:text-zinc-400 font-bold">{subjectLabel}</span>
+                            </div>
                             <div className="absolute bottom-5 left-5 text-xs font-mono text-zinc-500 dark:text-zinc-400">{docLabel}</div>
                             <div className="absolute bottom-5 right-5 text-xs font-mono text-zinc-500 dark:text-zinc-400">{currentCard.sec}</div>
                             
