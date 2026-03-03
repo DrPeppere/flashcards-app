@@ -57,13 +57,28 @@
         }
         .anim-next { animation: cardNext 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; }
         .anim-prev { animation: cardPrev 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; }
+        
+        /* Custom Scrollbar for smaller elements */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background-color: #d4d4d8;
+            border-radius: 10px;
+        }
+        .dark .custom-scrollbar::-webkit-scrollbar-thumb {
+            background-color: #3f3f46;
+        }
     </style>
 </head>
 <body class="bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-200 transition-colors duration-300">
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useRef } = React;
+        const { useState, useEffect, useRef, useMemo } = React;
 
         // --- SVGs / Icons ---
         const Icon = ({ children, size = 24, fill = "none", stroke = "currentColor", className = "" }) => (
@@ -82,6 +97,9 @@
         const MenuIcon = ({size}) => <Icon size={size}><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></Icon>;
         const X = ({size}) => <Icon size={size}><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></Icon>;
         const Star = ({size, fill, className}) => <Icon size={size} fill={fill} className={className}><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></Icon>;
+        const FolderPlus = ({size}) => <Icon size={size}><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><line x1="12" y1="11" x2="12" y2="17"></line><line x1="9" y1="14" x2="15" y2="14"></line></Icon>;
+        const Folder = ({size, className}) => <Icon size={size} className={className}><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></Icon>;
+        const GripVertical = ({size}) => <Icon size={size}><circle cx="9" cy="12" r="1"></circle><circle cx="9" cy="5" r="1"></circle><circle cx="9" cy="19" r="1"></circle><circle cx="15" cy="12" r="1"></circle><circle cx="15" cy="5" r="1"></circle><circle cx="15" cy="19" r="1"></circle></Icon>;
         const CheckCircle = ({size, className}) => <Icon size={size} className={className}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></Icon>;
         const Trash2 = ({size, className}) => <Icon size={size} className={className}><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></Icon>;
         const BookOpen = ({size, className}) => <Icon size={size} className={className}><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></Icon>;
@@ -111,9 +129,10 @@
             const [currentDeckId, setCurrentDeckId] = useState(null);
 
             const [allCards, setAllCards] = useState([]);
-            const [favorites, setFavorites] = useState([]);
+            // Manage folders (Favorites is just the default folder)
+            const [folders, setFolders] = useState([]); 
             const [mastered, setMastered] = useState([]); // Array of mastered card IDs
-            const [filter, setFilter] = useState('all'); // 'all', 'favorites', or 'mastered'
+            const [filter, setFilter] = useState('all'); // 'all', 'mastered', or 'folder_{id}'
             const [isSidebarOpen, setIsSidebarOpen] = useState(false);
             const [subjectLabel, setSubjectLabel] = useState('PHYS');
             const [docLabel, setDocLabel] = useState('CH10_12_SG');
@@ -125,6 +144,13 @@
             const [isDragging, setIsDragging] = useState(false);
             
             const [editingCard, setEditingCard] = useState(null); // Holds the card currently being edited
+            const [showFolderModal, setShowFolderModal] = useState(false); // Controls the manage folders modal
+            const [targetFolders, setTargetFolders] = useState([]); // Folders set as default for quick-save
+            const [newFolderName, setNewFolderName] = useState('');
+
+            // Drag and drop sorting refs
+            const dragItem = useRef(null);
+            const dragOverItem = useRef(null);
 
             // Sync theme to document class
             useEffect(() => {
@@ -145,7 +171,8 @@
                                 return { 
                                     ...deck, 
                                     currentIndex, 
-                                    favorites,
+                                    folders,
+                                    targetFolders,
                                     mastered,
                                     cards: allCards, // Save any edits to the cards
                                     lastAccessed: Date.now()
@@ -157,21 +184,33 @@
                         return updatedDecks;
                     });
                 }
-            }, [currentIndex, favorites, mastered, currentDeckId, allCards]);
+            }, [currentIndex, folders, targetFolders, mastered, currentDeckId, allCards]);
 
-            // Determine active cards based on current filter state
-            const activeCards = allCards.filter(c => {
-                if (filter === 'mastered') return mastered.includes(c.id);
-                if (filter === 'favorites') return favorites.includes(c.id) && !mastered.includes(c.id);
-                // Default 'all' view hides mastered cards by default to eliminate them
-                return !mastered.includes(c.id); 
-            });
+            // Determine active cards based on current filter state (maintaining custom sorted folder order)
+            const activeCards = useMemo(() => {
+                if (filter === 'mastered') {
+                    return allCards.filter(c => mastered.includes(c.id));
+                }
+                if (filter.startsWith('folder_')) {
+                    const folderId = filter.split('folder_')[1];
+                    const folder = folders.find(f => f.id === folderId);
+                    if (folder) {
+                        // Return cards matching folder order, filtering out mastered
+                        return folder.cards
+                            .filter(id => !mastered.includes(id))
+                            .map(id => allCards.find(c => c.id === id))
+                            .filter(Boolean); // Clean out any invalid mappings
+                    }
+                }
+                // Default 'all' view
+                return allCards.filter(c => !mastered.includes(c.id));
+            }, [allCards, mastered, filter, folders]);
 
             // Keyboard navigation
             useEffect(() => {
                 const handleKeyDown = (e) => {
-                    // Disable keyboard nav if we aren't studying or if we are actively typing in an edit modal
-                    if (view !== 'study' || editingCard || showSettingsModal) return; 
+                    // Disable keyboard nav if we aren't studying or if we are actively typing in an edit/folder modal
+                    if (view !== 'study' || editingCard || showSettingsModal || showFolderModal) return; 
                     
                     if (e.key === 'ArrowRight') {
                         handleNext();
@@ -185,7 +224,7 @@
 
                 window.addEventListener('keydown', handleKeyDown);
                 return () => window.removeEventListener('keydown', handleKeyDown);
-            }, [view, currentIndex, activeCards.length, editingCard, showSettingsModal]);
+            }, [view, currentIndex, activeCards.length, editingCard, showSettingsModal, showFolderModal]);
 
             // File Upload Handlers
             const handleDragOver = (e) => {
@@ -214,7 +253,14 @@
                 setAllCards(deck.cards);
                 setSubjectLabel(deck.subjectLabel);
                 setDocLabel(deck.docLabel);
-                setFavorites(deck.favorites || []);
+                
+                // Backwards compatibility migration for old decks that only had 'favorites' array
+                const loadedFolders = deck.folders || (
+                    deck.favorites ? [{ id: 'favorites', name: 'Favorites', cards: deck.favorites }] : [{ id: 'favorites', name: 'Favorites', cards: [] }]
+                );
+                
+                setFolders(loadedFolders);
+                setTargetFolders(deck.targetFolders || []);
                 setMastered(deck.mastered || []);
                 setCurrentIndex(deck.currentIndex || 0);
                 setCurrentDeckId(deck.id);
@@ -289,7 +335,8 @@
                         subjectLabel: newSubjectLabel,
                         docLabel: newDocLabel,
                         cards: parsedCardsWithIds,
-                        favorites: [],
+                        folders: [{ id: 'favorites', name: 'Favorites', cards: [] }], // Default folder config
+                        targetFolders: [],
                         mastered: [],
                         currentIndex: 0,
                         lastAccessed: Date.now()
@@ -328,13 +375,6 @@
                 }
             };
 
-            const toggleFavorite = (id, e) => {
-                e.stopPropagation();
-                setFavorites(prev => 
-                    prev.includes(id) ? prev.filter(f => f !== id) : [...prev, id]
-                );
-            };
-
             const toggleMastered = (id, e) => {
                 e.stopPropagation();
                 setMastered(prev => {
@@ -344,12 +384,122 @@
                     return [...prev, id];
                 });
                 
-                // If we mark it mastered in 'all' or 'favorites', the card vanishes from active list
+                // If we mark it mastered in 'all' or 'folder' view, the card vanishes from active list
                 if (filter !== 'mastered') {
                     setSlideDirection('none'); // avoid janky sliding if card gets wiped
                     setIsFlipped(false);
                     if (currentIndex === activeCards.length - 1 && currentIndex > 0) {
                         setCurrentIndex(currentIndex - 1);
+                    }
+                }
+            };
+
+            // Drag and Drop Sort within Sidebar
+            const handleSort = () => {
+                if (dragItem.current === null || dragOverItem.current === null) return;
+                if (dragItem.current === dragOverItem.current) return;
+                if (!filter.startsWith('folder_')) return;
+
+                const folderId = filter.split('folder_')[1];
+                const folderIndex = folders.findIndex(f => f.id === folderId);
+                if (folderIndex === -1) return;
+
+                const draggedCard = activeCards[dragItem.current];
+                const dragOverCard = activeCards[dragOverItem.current];
+
+                const newFolders = [...folders];
+                const folderCards = [...newFolders[folderIndex].cards];
+
+                const draggedIdxInFolder = folderCards.indexOf(draggedCard.id);
+                const dragOverIdxInFolder = folderCards.indexOf(dragOverCard.id);
+
+                folderCards.splice(draggedIdxInFolder, 1);
+                folderCards.splice(dragOverIdxInFolder, 0, draggedCard.id);
+
+                newFolders[folderIndex].cards = folderCards;
+                setFolders(newFolders);
+
+                // Re-calculate focus index to keep current card in view
+                let newActiveCards = [...activeCards];
+                newActiveCards.splice(dragItem.current, 1);
+                newActiveCards.splice(dragOverItem.current, 0, draggedCard);
+                const currentCardId = activeCards[currentIndex]?.id;
+                const newIndex = newActiveCards.findIndex(c => c.id === currentCardId);
+                if (newIndex !== -1) {
+                    setCurrentIndex(newIndex);
+                }
+
+                dragItem.current = null;
+                dragOverItem.current = null;
+            };
+
+            // Folder Management Actions
+            const toggleCardInFolder = (folderId, cardId) => {
+                setFolders(prev => prev.map(f => {
+                    if (f.id === folderId) {
+                        const hasCard = f.cards.includes(cardId);
+                        return { ...f, cards: hasCard ? f.cards.filter(id => id !== cardId) : [...f.cards, cardId] };
+                    }
+                    return f;
+                }));
+            };
+
+            const toggleTargetFolder = (folderId) => {
+                setTargetFolders(prev => prev.includes(folderId) ? prev.filter(id => id !== folderId) : [...prev, folderId]);
+            };
+
+            const handleQuickSave = (cardId, e) => {
+                e.stopPropagation();
+                if (targetFolders.length === 0) {
+                    setShowFolderModal(true); // Open manager if no defaults are set
+                    return;
+                }
+                
+                setFolders(prev => {
+                    const newFolders = [...prev];
+                    // Check if card is in ALL target folders
+                    const isInAll = targetFolders.every(tId => {
+                        const f = newFolders.find(fold => fold.id === tId);
+                        return f && f.cards.includes(cardId);
+                    });
+
+                    targetFolders.forEach(tId => {
+                        const fIndex = newFolders.findIndex(fold => fold.id === tId);
+                        if (fIndex > -1) {
+                            const hasCard = newFolders[fIndex].cards.includes(cardId);
+                            if (isInAll) {
+                                // Remove from all
+                                newFolders[fIndex].cards = newFolders[fIndex].cards.filter(id => id !== cardId);
+                            } else if (!hasCard) {
+                                // Add to all it's missing from
+                                newFolders[fIndex].cards = [...newFolders[fIndex].cards, cardId];
+                            }
+                        }
+                    });
+                    return newFolders;
+                });
+            };
+
+            const createFolder = () => {
+                if (!newFolderName.trim()) return;
+                const newFolderId = 'folder_' + Date.now();
+                const newFolder = { id: newFolderId, name: newFolderName.trim(), cards: [] };
+                setFolders(prev => [...prev, newFolder]);
+                setNewFolderName('');
+                
+                // Automatically set as a default target if it's the first custom folder
+                if (folders.filter(f => f.id !== 'favorites').length === 0) {
+                    setTargetFolders([newFolderId]);
+                }
+            };
+
+            const deleteFolder = (id) => {
+                if (window.confirm("Delete this folder?")) {
+                    setFolders(folders.filter(f => f.id !== id));
+                    setTargetFolders(prev => prev.filter(t => t !== id));
+                    if (filter === `folder_${id}`) {
+                        setFilter('all');
+                        setCurrentIndex(0);
                     }
                 }
             };
@@ -397,7 +547,7 @@
             };
 
             const handleCardTap = () => {
-                if (!isSwiping.current && !editingCard) {
+                if (!isSwiping.current && !editingCard && !showFolderModal) {
                     setIsFlipped(!isFlipped);
                 }
             };
@@ -581,8 +731,15 @@
             // Study View
             const currentCard = activeCards[currentIndex] || {};
             const progress = activeCards.length > 0 ? ((currentIndex + 1) / activeCards.length) * 100 : 0;
-            const isFav = currentCard.id ? favorites.includes(currentCard.id) : false;
             const isMastered = currentCard.id ? mastered.includes(currentCard.id) : false;
+            
+            const favFolder = folders.find(f => f.id === 'favorites');
+            const isFav = favFolder ? favFolder.cards.includes(currentCard.id) : false;
+            
+            const isInTarget = targetFolders.length > 0 && targetFolders.every(tId => {
+                const f = folders.find(fold => fold.id === tId);
+                return f && f.cards.includes(currentCard.id);
+            });
             
             // Conditionally apply class to prevent unwanted animations
             const slideClass = slideDirection === 'next' ? 'anim-next' : slideDirection === 'prev' ? 'anim-prev' : '';
@@ -590,6 +747,59 @@
             return (
                 <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-200 flex flex-col font-sans transition-colors duration-300">
                 
+                {/* Folder Add/Manage Modal */}
+                {showFolderModal && (
+                    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/50 dark:bg-black/80 backdrop-blur-sm" onClick={() => setShowFolderModal(false)}>
+                        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl w-full max-w-sm p-6 flex flex-col shadow-2xl transition-colors duration-300" onClick={e => e.stopPropagation()}>
+                            <div className="flex justify-between items-center mb-4">
+                                <h2 className="text-xl font-bold text-zinc-900 dark:text-white">Manage Folders</h2>
+                                <button onClick={() => setShowFolderModal(false)} className="text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-white transition-colors">
+                                    <X size={20} />
+                                </button>
+                            </div>
+                            
+                            <div className="max-h-60 overflow-y-auto mb-4 flex flex-col gap-2 p-1 custom-scrollbar">
+                                {folders.filter(f => f.id !== 'favorites').length === 0 ? (
+                                    <p className="text-sm text-zinc-500 dark:text-zinc-400 text-center py-4">No custom folders yet. Create one below!</p>
+                                ) : (
+                                    <>
+                                        <p className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">Default Quick-Save Folders</p>
+                                        {folders.filter(f => f.id !== 'favorites').map(f => (
+                                            <label key={f.id} className="flex items-center gap-3 p-3 border border-zinc-200 dark:border-zinc-700 rounded-xl cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors">
+                                                <input 
+                                                    type="checkbox" 
+                                                    checked={targetFolders.includes(f.id)} 
+                                                    onChange={() => toggleTargetFolder(f.id)}
+                                                    className="w-5 h-5 rounded border-zinc-300 dark:border-zinc-600 text-zinc-900 focus:ring-zinc-900 dark:focus:ring-white accent-zinc-900 dark:accent-zinc-100 cursor-pointer"
+                                                />
+                                                <Folder size={18} className="text-zinc-500 dark:text-zinc-400" />
+                                                <span className="font-medium text-zinc-800 dark:text-zinc-200 flex-1">{f.name}</span>
+                                                <button onClick={(e) => { e.preventDefault(); deleteFolder(f.id); }} className="p-1.5 text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-md transition-colors" title="Delete Folder">
+                                                    <Trash2 size={16} />
+                                                </button>
+                                            </label>
+                                        ))}
+                                    </>
+                                )}
+                            </div>
+
+                            <div className="flex gap-2 pt-4 border-t border-zinc-200 dark:border-zinc-800">
+                                <input 
+                                    type="text"
+                                    value={newFolderName}
+                                    onChange={e => setNewFolderName(e.target.value)}
+                                    placeholder="New folder name..."
+                                    className="flex-1 p-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 rounded-lg text-sm text-zinc-900 dark:text-white focus:outline-none focus:border-zinc-500 transition-colors"
+                                    onKeyDown={e => e.key === 'Enter' && createFolder()}
+                                />
+                                <button onClick={createFolder} className="px-4 py-2.5 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-lg font-bold text-sm hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors shadow-sm">
+                                    Create
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 {/* Editing Modal */}
                 {editingCard && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 dark:bg-black/80 backdrop-blur-sm" onClick={() => setEditingCard(null)}>
@@ -651,47 +861,82 @@
                     </button>
                     </div>
                     
-                    <div className="flex p-2 gap-1 border-b border-zinc-200 dark:border-zinc-800 transition-colors duration-300">
-                        <button 
-                            onClick={() => { setFilter('all'); setSlideDirection('next'); setCurrentIndex(0); setIsFlipped(false); }}
-                            className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-md transition-colors ${filter === 'all' ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white' : 'text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200'}`}
+                    <div className="flex flex-col p-3 gap-3 border-b border-zinc-200 dark:border-zinc-800 transition-colors duration-300">
+                        <div className="flex gap-2">
+                            <button 
+                                onClick={() => { setFilter('all'); setSlideDirection('next'); setCurrentIndex(0); setIsFlipped(false); }}
+                                className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-md transition-colors ${filter === 'all' ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white' : 'text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200'}`}
+                            >
+                                Study All
+                            </button>
+                            <button 
+                                onClick={() => { setFilter('mastered'); setSlideDirection('next'); setCurrentIndex(0); setIsFlipped(false); }}
+                                className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-md transition-colors ${filter === 'mastered' ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white' : 'text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200'}`}
+                            >
+                                Known ({mastered.length})
+                            </button>
+                        </div>
+                        <select
+                            value={filter.startsWith('folder_') ? filter : ''}
+                            onChange={(e) => {
+                                if (e.target.value) {
+                                    setFilter(e.target.value);
+                                    setSlideDirection('next');
+                                    setCurrentIndex(0);
+                                    setIsFlipped(false);
+                                }
+                            }}
+                            className={`w-full py-2 px-3 text-sm font-bold rounded-lg outline-none transition-colors border ${filter.startsWith('folder_') ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white border-zinc-300 dark:border-zinc-600' : 'bg-transparent text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800/50'}`}
                         >
-                            Study
-                        </button>
-                        <button 
-                            onClick={() => { setFilter('favorites'); setSlideDirection('next'); setCurrentIndex(0); setIsFlipped(false); }}
-                            className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-md transition-colors ${filter === 'favorites' ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white' : 'text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200'}`}
+                            <option value="" disabled>Select Folder...</option>
+                            {folders.map(f => (
+                                <option key={f.id} value={`folder_${f.id}`}>
+                                    📁 {f.name} ({f.cards.filter(id => !mastered.includes(id)).length})
+                                </option>
+                            ))}
+                        </select>
+                        <button
+                            onClick={() => setIsSidebarOpen(false) || setShowFolderModal(true)}
+                            className="w-full mt-1 py-1.5 px-3 text-xs font-bold rounded-lg text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-800 transition-colors flex items-center justify-center gap-2 border border-dashed border-zinc-300 dark:border-zinc-700"
                         >
-                            Favs ({favorites.filter(id => !mastered.includes(id)).length})
-                        </button>
-                        <button 
-                            onClick={() => { setFilter('mastered'); setSlideDirection('next'); setCurrentIndex(0); setIsFlipped(false); }}
-                            className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-md transition-colors ${filter === 'mastered' ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white' : 'text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200'}`}
-                        >
-                            Known ({mastered.length})
+                            <Settings size={14} /> Manage Folders
                         </button>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto p-2">
+                    <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
                     {activeCards.length === 0 ? (
                         <div className="p-4 text-center text-sm text-zinc-500 mt-4">
                         No cards found in this view.
                         </div>
                     ) : (
                         activeCards.map((card, idx) => (
-                        <button
+                        <div
                             key={card.id}
-                            onClick={() => { 
-                                setSlideDirection('none'); // Instant jump for sidebar clicks
-                                setCurrentIndex(idx); 
-                                setIsFlipped(false); 
-                                setIsSidebarOpen(false); 
-                            }}
-                            className={`w-full text-left p-3 rounded-lg mb-1 text-sm line-clamp-2 transition-colors ${currentIndex === idx ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white border border-zinc-300 dark:border-zinc-700' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-zinc-300 border border-transparent'}`}
+                            draggable={filter.startsWith('folder_')}
+                            onDragStart={() => { dragItem.current = idx; }}
+                            onDragEnter={() => { dragOverItem.current = idx; }}
+                            onDragEnd={handleSort}
+                            onDragOver={(e) => e.preventDefault()}
+                            className={`flex items-center w-full p-2 rounded-lg mb-1 transition-colors ${currentIndex === idx ? 'bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700' : 'hover:bg-zinc-50 dark:hover:bg-zinc-800/50 border border-transparent'}`}
                         >
-                            {card.sec && <span className="text-xs font-mono text-zinc-400 dark:text-zinc-500 mr-2">[{card.sec}]</span>}
-                            {card.q}
-                        </button>
+                            {filter.startsWith('folder_') && (
+                                <div className="cursor-grab active:cursor-grabbing text-zinc-400 dark:text-zinc-600 hover:text-zinc-600 dark:hover:text-zinc-400 mr-2 flex-shrink-0 transition-colors" title="Drag to reorder">
+                                    <GripVertical size={16} />
+                                </div>
+                            )}
+                            <button
+                                onClick={() => { 
+                                    setSlideDirection('none'); // Instant jump for sidebar clicks
+                                    setCurrentIndex(idx); 
+                                    setIsFlipped(false); 
+                                    setIsSidebarOpen(false); 
+                                }}
+                                className="flex-1 text-left text-sm line-clamp-2 text-zinc-700 dark:text-zinc-300"
+                            >
+                                {card.sec && <span className="text-xs font-mono text-zinc-400 dark:text-zinc-500 mr-2">[{card.sec}]</span>}
+                                {card.q}
+                            </button>
+                        </div>
                         ))
                     )}
                     </div>
@@ -737,9 +982,9 @@
                     
                     {activeCards.length === 0 ? (
                     <div className="w-full flex flex-col items-center justify-center flex-1 text-zinc-500">
-                        {filter === 'favorites' ? <Star size={48} className="mb-4 opacity-20 text-zinc-500" /> : <CheckCircle size={48} className="mb-4 opacity-20 text-green-500" />}
-                        <p className="text-center px-4 font-medium text-zinc-600 dark:text-zinc-400">
-                            {filter === 'favorites' ? "No favorite cards yet." : 
+                        {filter.startsWith('folder_') ? <Folder size={48} className="mb-4 opacity-20 text-zinc-500" /> : <CheckCircle size={48} className="mb-4 opacity-20 text-green-500" />}
+                        <p className="text-center px-4 font-medium text-zinc-600 dark:text-zinc-400 max-w-sm">
+                            {filter.startsWith('folder_') ? "This folder is empty. Click the 'Folder+' icon on a card to add it here." : 
                              filter === 'mastered' ? "No mastered cards yet." : 
                              "You've mastered all the cards! Great job!"}
                         </p>
@@ -797,11 +1042,18 @@
                                     <Edit2 size={20} />
                                 </button>
                                 <button 
-                                    onClick={(e) => toggleFavorite(currentCard.id, e)}
+                                    onClick={(e) => { e.stopPropagation(); toggleCardInFolder('favorites', currentCard.id); }}
                                     className={`p-2 rounded-full transition-colors ${isFav ? 'text-yellow-500 dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800/50' : 'text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 dark:text-zinc-500 dark:hover:text-zinc-300 dark:hover:bg-zinc-800/50'}`}
                                     title={isFav ? "Remove from Favorites" : "Add to Favorites"}
                                 >
                                     <Star size={22} fill={isFav ? "currentColor" : "none"} />
+                                </button>
+                                <button 
+                                    onClick={(e) => handleQuickSave(currentCard.id, e)}
+                                    className={`p-2 rounded-full transition-colors ${isInTarget ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50' : 'text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 dark:text-zinc-500 dark:hover:text-zinc-300 dark:hover:bg-zinc-800/50'}`}
+                                    title={targetFolders.length > 0 ? (isInTarget ? "Remove from Quick-Save Folders" : "Save to Default Folders") : "Set Default Quick-Save Folders"}
+                                >
+                                    <FolderPlus size={22} />
                                 </button>
                                 <button 
                                     onClick={(e) => toggleMastered(currentCard.id, e)}
@@ -812,13 +1064,13 @@
                                 </button>
                             </div>
 
-                            {/* Corner Labels */}
+                            {/* Corner Labels (Subject perfectly centered) */}
                             <div className="absolute top-5 left-5 text-xs font-mono text-zinc-500 dark:text-zinc-500">{currentIndex + 1}</div>
-                            <div className="absolute top-5 right-[130px] text-xs font-mono text-zinc-500 dark:text-zinc-500 font-bold">{subjectLabel}</div>
+                            <div className="absolute top-5 left-1/2 -translate-x-1/2 text-xs font-mono text-zinc-500 dark:text-zinc-500 font-bold">{subjectLabel}</div>
                             <div className="absolute bottom-5 left-5 text-xs font-mono text-zinc-500 dark:text-zinc-500">{docLabel}</div>
                             <div className="absolute bottom-5 right-5 text-xs font-mono text-zinc-500 dark:text-zinc-500">{currentCard.sec}</div>
                             
-                            <div className="flex-1 overflow-y-auto mt-10 mb-10 px-2 flex flex-col">
+                            <div className="flex-1 overflow-y-auto mt-10 mb-10 px-2 flex flex-col custom-scrollbar">
                                 <h2 className="m-auto text-xl sm:text-2xl md:text-3xl font-bold text-zinc-900 dark:text-white leading-snug">
                                 {currentCard.q}
                                 </h2>
@@ -845,11 +1097,18 @@
                                     <Edit2 size={20} />
                                 </button>
                                 <button 
-                                    onClick={(e) => toggleFavorite(currentCard.id, e)}
+                                    onClick={(e) => { e.stopPropagation(); toggleCardInFolder('favorites', currentCard.id); }}
                                     className={`p-2 rounded-full transition-colors ${isFav ? 'text-yellow-500 dark:text-white hover:bg-zinc-200 dark:hover:bg-zinc-700' : 'text-zinc-400 hover:text-zinc-900 hover:bg-zinc-200 dark:text-zinc-500 dark:hover:text-zinc-300 dark:hover:bg-zinc-700'}`}
                                     title={isFav ? "Remove from Favorites" : "Add to Favorites"}
                                 >
                                     <Star size={22} fill={isFav ? "currentColor" : "none"} />
+                                </button>
+                                <button 
+                                    onClick={(e) => handleQuickSave(currentCard.id, e)}
+                                    className={`p-2 rounded-full transition-colors ${isInTarget ? 'text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/40 hover:bg-blue-200 dark:hover:bg-blue-800/60' : 'text-zinc-400 hover:text-zinc-900 hover:bg-zinc-200 dark:text-zinc-500 dark:hover:text-zinc-300 dark:hover:bg-zinc-700'}`}
+                                    title={targetFolders.length > 0 ? (isInTarget ? "Remove from Quick-Save Folders" : "Save to Default Folders") : "Set Default Quick-Save Folders"}
+                                >
+                                    <FolderPlus size={22} />
                                 </button>
                                 <button 
                                     onClick={(e) => toggleMastered(currentCard.id, e)}
@@ -860,13 +1119,13 @@
                                 </button>
                             </div>
 
-                            {/* Corner Labels */}
+                            {/* Corner Labels (Subject perfectly centered) */}
                             <div className="absolute top-5 left-5 text-xs font-mono text-zinc-500 dark:text-zinc-400">{currentIndex + 1}</div>
-                            <div className="absolute top-5 right-[130px] text-xs font-mono text-zinc-500 dark:text-zinc-400 font-bold">{subjectLabel}</div>
+                            <div className="absolute top-5 left-1/2 -translate-x-1/2 text-xs font-mono text-zinc-500 dark:text-zinc-400 font-bold">{subjectLabel}</div>
                             <div className="absolute bottom-5 left-5 text-xs font-mono text-zinc-500 dark:text-zinc-400">{docLabel}</div>
                             <div className="absolute bottom-5 right-5 text-xs font-mono text-zinc-500 dark:text-zinc-400">{currentCard.sec}</div>
                             
-                            <div className="flex-1 overflow-y-auto mt-10 mb-10 px-2 flex flex-col">
+                            <div className="flex-1 overflow-y-auto mt-10 mb-10 px-2 flex flex-col custom-scrollbar">
                                 <p className="m-auto text-lg sm:text-xl md:text-2xl text-zinc-800 dark:text-zinc-100 font-bold leading-relaxed">
                                 {currentCard.a}
                                 </p>
