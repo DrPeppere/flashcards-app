@@ -44,6 +44,7 @@
         body {
             overscroll-behavior-y: none;
             -webkit-tap-highlight-color: transparent;
+            font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
         }
 
         /* Card Transition Animations */
@@ -61,6 +62,7 @@
         /* Custom Scrollbar for smaller elements */
         .custom-scrollbar::-webkit-scrollbar {
             width: 6px;
+            height: 6px;
         }
         .custom-scrollbar::-webkit-scrollbar-track {
             background: transparent;
@@ -153,7 +155,7 @@
             const [editingDeckId, setEditingDeckId] = useState(null);
             const [editDeckName, setEditDeckName] = useState('');
 
-            // Library State (GitHub Database)
+            // Library State (GitHub Database relative fetching)
             const [libraryDecks, setLibraryDecks] = useState([]);
             const [isLibraryLoading, setIsLibraryLoading] = useState(false);
             const [libraryError, setLibraryError] = useState('');
@@ -321,18 +323,41 @@
                 if (file) processFile(file);
             };
 
+            // Safely fetch library with fallback
             const fetchLibrary = async () => {
-                if (GITHUB_USER === "YOUR_USERNAME") return; // Skip if user hasn't configured it
                 setIsLibraryLoading(true);
                 setLibraryError('');
                 try {
-                    const response = await fetch(GITHUB_BASE + 'catalog.json');
-                    if (!response.ok) throw new Error("Could not find catalog.json in your repo.");
-                    const catalog = await response.json();
-                    setLibraryDecks(catalog);
+                    let catalogData = null;
+                    
+                    // Try relative fetch first ONLY if we are in a proper HTTP context
+                    if (window.location.protocol.startsWith('http')) {
+                        try {
+                            const response = await fetch('./catalog.json');
+                            if (response.ok) {
+                                catalogData = await response.json();
+                            }
+                        } catch (e) {
+                            // ignore relative fetch failure, proceed to fallback
+                        }
+                    }
+
+                    // Fallback to GitHub repo if local failed or if we are on a local file://
+                    if (!catalogData && GITHUB_USER !== "YOUR_USERNAME") {
+                        const response = await fetch(GITHUB_BASE + 'catalog.json');
+                        if (response.ok) {
+                            catalogData = await response.json();
+                        }
+                    }
+
+                    if (catalogData) {
+                        setLibraryDecks(catalogData);
+                    } else {
+                        throw new Error("Could not find catalog.");
+                    }
                 } catch (err) {
                     console.error(err);
-                    setLibraryError("Couldn't connect to GitHub library.");
+                    setLibraryError("Couldn't connect to library. Ensure catalog.json exists.");
                 } finally {
                     setIsLibraryLoading(false);
                 }
@@ -341,13 +366,36 @@
             const installLibraryDeck = async (libraryDeck) => {
                 setIsInstalling(libraryDeck.file);
                 try {
-                    const response = await fetch(GITHUB_BASE + libraryDeck.file);
-                    const rawCards = await response.json();
+                    let rawCards = null;
+
+                    // Try relative fetch first
+                    if (window.location.protocol.startsWith('http')) {
+                        try {
+                            const response = await fetch('./' + libraryDeck.file);
+                            if (response.ok) {
+                                rawCards = await response.json();
+                            }
+                        } catch (e) {
+                            // ignore relative fetch failure
+                        }
+                    }
+
+                    // Fallback to GitHub repo
+                    if (!rawCards && GITHUB_USER !== "YOUR_USERNAME") {
+                        const response = await fetch(GITHUB_BASE + libraryDeck.file);
+                        if (response.ok) {
+                            rawCards = await response.json();
+                        }
+                    }
+
+                    if (!rawCards) {
+                        throw new Error("File not found or unreachable.");
+                    }
                     
                     const formattedCards = rawCards.map((c, i) => ({
                         id: `card_${Date.now()}_${Math.random().toString(36).substring(2,7)}_${i}`,
-                        subj: libraryDeck.subject,
-                        doc: libraryDeck.doc,
+                        subj: libraryDeck.subject || "SUBJ",
+                        doc: libraryDeck.doc || "DOC",
                         sec: c.sec || '',
                         q: c.q || '',
                         a: c.a || ''
@@ -356,8 +404,8 @@
                     const newDeck = {
                         id: 'deck_' + Date.now(),
                         name: libraryDeck.name,
-                        subjectLabel: libraryDeck.subject,
-                        docLabel: libraryDeck.doc,
+                        subjectLabel: libraryDeck.subject || "SUBJ",
+                        docLabel: libraryDeck.doc || "DOC",
                         cards: formattedCards,
                         folders: [{ id: 'favorites', name: 'Favorites', cards: [] }],
                         mastered: [],
@@ -371,8 +419,7 @@
                         return updated;
                     });
 
-                    // Automatically load the newly installed deck
-                    loadDeck(newDeck);
+                    // Success! App remains on dashboard.
                 } catch (err) {
                     alert("Failed to install deck: " + err.message);
                 } finally {
@@ -539,7 +586,7 @@ cardsData.forEach(card => {
                 setShowCombineModal(false);
                 setDecksToCombine([]);
                 setCombineDeckName('');
-                loadDeck(newDeck);
+                // Success! App remains on dashboard.
             };
 
             const handleCreateDeck = () => {
@@ -565,7 +612,7 @@ cardsData.forEach(card => {
 
                 setShowCreateDeckModal(false);
                 setNewDeckDetails({ name: '', subj: '', doc: '' });
-                loadDeck(newDeck);
+                // Success! App remains on dashboard.
             };
 
             const deleteDeck = (id, e) => {
@@ -649,7 +696,7 @@ cardsData.forEach(card => {
                         return updated;
                     });
 
-                    loadDeck(newDeck);
+                    // Success! App remains on dashboard.
 
                 } catch (err) {
                     setError(err.message || 'Failed to parse the file. Ensure it is formatted correctly.');
@@ -1101,7 +1148,7 @@ cardsData.forEach(card => {
                                 
                                 <div className="text-center mt-2">
                                     <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">v2.5 Full Edition</p>
-                                    <p className="text-[9px] text-zinc-400 mt-1 truncate italic">DB: github.com/{GITHUB_USER}/{GITHUB_REPO}</p>
+                                    <p className="text-[9px] text-zinc-400 mt-1 truncate italic">DB: Local/Relative (Same Repo)</p>
                                 </div>
 
                                 <div>
@@ -1231,60 +1278,8 @@ cardsData.forEach(card => {
                         </div>
                     )}
 
-                    {/* Explore Library (GitHub Integrated) */}
-                    <div className="w-full max-w-xl bg-white dark:bg-zinc-900 rounded-2xl shadow-xl p-8 border border-zinc-200 dark:border-zinc-800 mb-8 transition-colors duration-300">
-                        <div className="flex items-center justify-between mb-6">
-                            <div>
-                                <h2 className="text-xl font-bold text-zinc-900 dark:text-white">Explore Library</h2>
-                                <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-1">Preset decks from GitHub</p>
-                            </div>
-                            <button 
-                                onClick={fetchLibrary} 
-                                className={`p-2 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-400 ${isLibraryLoading ? 'animate-spin' : ''}`}
-                            >
-                                <RefreshCw size={18}/>
-                            </button>
-                        </div>
-                        
-                        {libraryError ? (
-                            <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl text-red-500 text-sm flex gap-3 items-center">
-                                <AlertCircle size={20}/> {libraryError}
-                            </div>
-                        ) : isLibraryLoading ? (
-                            <div className="space-y-3">
-                                <div className="h-16 bg-zinc-100 dark:bg-zinc-800 rounded-xl animate-pulse"></div>
-                                <div className="h-16 bg-zinc-100 dark:bg-zinc-800 rounded-xl animate-pulse"></div>
-                            </div>
-                        ) : libraryDecks.length > 0 ? (
-                            <div className="grid gap-3">
-                                {libraryDecks.map(deck => (
-                                    <div key={deck.file} className="p-4 border border-zinc-200 dark:border-zinc-800 rounded-xl flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-950/30 group hover:border-zinc-400 transition-colors">
-                                        <div>
-                                            <h4 className="font-bold text-sm text-zinc-800 dark:text-zinc-200">{deck.name}</h4>
-                                            <div className="flex gap-3 text-[10px] text-zinc-500 uppercase font-bold mt-0.5">
-                                                <span>{deck.subject}</span>
-                                                <span>{deck.doc}</span>
-                                            </div>
-                                        </div>
-                                        <button 
-                                            onClick={() => installLibraryDeck(deck)} 
-                                            disabled={isInstalling === deck.file}
-                                            className="px-4 py-2 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 text-xs font-bold rounded-lg shadow-sm hover:scale-105 transition-transform disabled:opacity-50"
-                                        >
-                                            {isInstalling === deck.file ? 'Installing...' : 'Install'}
-                                        </button>
-                                    </div>
-                                ))}
-                            </div>
-                        ) : (
-                            <div className="text-center py-4 text-zinc-500 text-sm italic">
-                                {GITHUB_USER === "YOUR_USERNAME" ? "Set your GitHub username in the code to see library decks." : "No decks found in the library catalog."}
-                            </div>
-                        )}
-                    </div>
-
                     {/* Upload Section */}
-                    <div className="w-full max-w-xl bg-white dark:bg-zinc-900 rounded-2xl shadow-xl p-8 border border-zinc-200 dark:border-zinc-800 transition-colors duration-300">
+                    <div className="w-full max-w-xl bg-white dark:bg-zinc-900 rounded-2xl shadow-xl p-8 border border-zinc-200 dark:border-zinc-800 transition-colors duration-300 mb-8">
                     <div className="flex items-center justify-between mb-8">
                         <div>
                         <h2 className="text-xl font-bold text-zinc-900 dark:text-white">Add New Deck</h2>
@@ -1351,6 +1346,58 @@ cardsData.forEach(card => {
                         <span className="text-sm font-medium">{error}</span>
                         </div>
                     )}
+                    </div>
+
+                    {/* Explore Library (Relative Fetching) */}
+                    <div className="w-full max-w-xl bg-white dark:bg-zinc-900 rounded-2xl shadow-xl p-8 border border-zinc-200 dark:border-zinc-800 transition-colors duration-300">
+                        <div className="flex items-center justify-between mb-6">
+                            <div>
+                                <h2 className="text-xl font-bold text-zinc-900 dark:text-white">Explore Library</h2>
+                                <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-1">Preset decks from this repository</p>
+                            </div>
+                            <button 
+                                onClick={fetchLibrary} 
+                                className={`p-2 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-400 ${isLibraryLoading ? 'animate-spin' : ''}`}
+                            >
+                                <RefreshCw size={18}/>
+                            </button>
+                        </div>
+                        
+                        {libraryError ? (
+                            <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl text-red-500 text-sm flex gap-3 items-center">
+                                <AlertCircle size={20}/> {libraryError}
+                            </div>
+                        ) : isLibraryLoading ? (
+                            <div className="space-y-3">
+                                <div className="h-16 bg-zinc-100 dark:bg-zinc-800 rounded-xl animate-pulse"></div>
+                                <div className="h-16 bg-zinc-100 dark:bg-zinc-800 rounded-xl animate-pulse"></div>
+                            </div>
+                        ) : libraryDecks.length > 0 ? (
+                            <div className="grid gap-3">
+                                {libraryDecks.map(deck => (
+                                    <div key={deck.file} className="p-4 border border-zinc-200 dark:border-zinc-800 rounded-xl flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-950/30 group hover:border-zinc-400 transition-colors">
+                                        <div>
+                                            <h4 className="font-bold text-sm text-zinc-800 dark:text-zinc-200">{deck.name}</h4>
+                                            <div className="flex gap-3 text-[10px] text-zinc-500 uppercase font-bold mt-0.5">
+                                                <span>{deck.subject}</span>
+                                                <span>{deck.doc}</span>
+                                            </div>
+                                        </div>
+                                        <button 
+                                            onClick={() => installLibraryDeck(deck)} 
+                                            disabled={isInstalling === deck.file}
+                                            className="px-4 py-2 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 text-xs font-bold rounded-lg shadow-sm hover:scale-105 transition-transform disabled:opacity-50"
+                                        >
+                                            {isInstalling === deck.file ? 'Installing...' : 'Install'}
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="text-center py-4 text-zinc-500 text-sm italic">
+                                No decks found in the library catalog. Add a catalog.json file to your repo.
+                            </div>
+                        )}
                     </div>
                 </div>
                 );
@@ -1525,7 +1572,7 @@ cardsData.forEach(card => {
                 {/* Sidebar */}
                 <div className={`fixed inset-y-0 left-0 w-72 bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800 z-50 transform transition-transform duration-300 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} flex flex-col`}>
                     <div className="p-4 flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 transition-colors duration-300">
-                    <h2 className="font-bold text-lg text-zinc-900 dark:text-white">Cards</h2>
+                    <h2 className="font-bold text-lg text-zinc-900 dark:text-white">Cards In View</h2>
                     <button onClick={() => setIsSidebarOpen(false)} className="p-2 text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors">
                         <X size={20} />
                     </button>
@@ -1568,6 +1615,7 @@ cardsData.forEach(card => {
                         ))
                     )}
                     </div>
+                    <button onClick={() => { setIsSidebarOpen(false); setShowFolderModal(true); }} className="p-4 border-t border-zinc-200 dark:border-zinc-800 text-xs font-bold text-zinc-500 uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"><Settings size={14}/> Manage Folders</button>
                 </div>
 
                 {/* Header */}
@@ -1752,28 +1800,28 @@ cardsData.forEach(card => {
                                 </button>
                                 <button 
                                     onClick={(e) => { e.stopPropagation(); toggleCardInFolder('favorites', activeIdForActions); }}
-                                    className={`p-2 rounded-full transition-colors ${isFav ? 'text-amber-500 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/20 hover:bg-amber-100 dark:hover:bg-amber-500/30' : 'text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 dark:text-zinc-500 dark:hover:text-zinc-300 dark:hover:bg-zinc-800/50'}`}
+                                    className={`p-2 rounded-full transition-colors ${isFav ? 'text-amber-500 dark:text-amber-400 bg-amber-100 dark:bg-amber-500/20 hover:bg-amber-200 dark:hover:bg-amber-500/30' : 'text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 dark:text-zinc-500 dark:hover:text-zinc-300 dark:hover:bg-zinc-800/50'}`}
                                     title={isFav ? "Remove from Favorites" : "Add to Favorites"}
                                 >
                                     <Star size={22} fill={isFav ? "currentColor" : "none"} />
                                 </button>
                                 <button 
                                     onClick={(e) => { e.stopPropagation(); setSavingCardId(activeIdForActions); }}
-                                    className={`p-2 rounded-full transition-colors ${inCustomFolder ? 'text-blue-500 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/20 hover:bg-blue-100 dark:hover:bg-blue-500/30' : 'text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 dark:text-zinc-500 dark:hover:text-zinc-300 dark:hover:bg-zinc-800/50'}`}
+                                    className={`p-2 rounded-full transition-colors ${inCustomFolder ? 'text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-500/20 hover:bg-blue-200 dark:hover:bg-blue-500/30' : 'text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 dark:text-zinc-500 dark:hover:text-zinc-300 dark:hover:bg-zinc-800/50'}`}
                                     title="Save to Folders"
                                 >
                                     <FolderPlus size={22} />
                                 </button>
                                 <button 
                                     onClick={handleTryAgain}
-                                    className={`p-2 rounded-full transition-colors text-zinc-400 hover:text-indigo-600 hover:bg-indigo-50 dark:text-zinc-500 dark:hover:text-indigo-400 dark:hover:bg-indigo-500/20`}
+                                    className={`p-2 rounded-full transition-colors text-zinc-400 hover:text-indigo-600 hover:bg-indigo-100 dark:text-zinc-500 dark:hover:text-indigo-400 dark:hover:bg-indigo-500/30`}
                                     title="Try Again (Review in 5 cards)"
                                 >
                                     <RefreshCw size={20} />
                                 </button>
                                 <button 
                                     onClick={(e) => toggleMastered(activeIdForActions, e)}
-                                    className={`p-2 rounded-full transition-colors ${isMastered ? 'text-emerald-500 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/20 hover:bg-emerald-100 dark:hover:bg-emerald-500/30' : 'text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 dark:text-zinc-500 dark:hover:text-zinc-300 dark:hover:bg-zinc-800/50'}`}
+                                    className={`p-2 rounded-full transition-colors ${isMastered ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-500/20 hover:bg-emerald-200 dark:hover:bg-emerald-500/30' : 'text-zinc-400 hover:text-zinc-900 hover:bg-zinc-200 dark:text-zinc-500 dark:hover:text-zinc-300 dark:hover:bg-zinc-700'}`}
                                     title={isMastered ? "Unmark Mastered" : "Mark as Mastered (Eliminate)"}
                                 >
                                     <CheckCircle size={22} />
@@ -1782,11 +1830,11 @@ cardsData.forEach(card => {
 
                             {/* Corner Labels */}
                             <div className="absolute top-5 left-5 flex items-center gap-2">
-                                <span className="text-xs font-mono text-zinc-500 dark:text-zinc-500">{currentIndex + 1}</span>
-                                <span className="text-xs font-mono text-zinc-500 dark:text-zinc-500 font-bold">{subjectLabel}</span>
+                                <span className="text-xs font-mono text-zinc-500 dark:text-zinc-400">{currentIndex + 1}</span>
+                                <span className="text-xs font-mono text-zinc-500 dark:text-zinc-400 font-bold">{subjectLabel}</span>
                             </div>
-                            <div className="absolute bottom-5 left-5 text-xs font-mono text-zinc-500 dark:text-zinc-500">{docLabel}</div>
-                            <div className="absolute bottom-5 right-5 text-xs font-mono text-zinc-500 dark:text-zinc-500">{currentCard.sec}</div>
+                            <div className="absolute bottom-5 left-5 text-xs font-mono text-zinc-500 dark:text-zinc-400">{docLabel}</div>
+                            <div className="absolute bottom-5 right-5 text-xs font-mono text-zinc-500 dark:text-zinc-400">{currentCard.sec}</div>
                             
                             <div className="flex-1 overflow-y-auto mt-10 mb-10 px-2 flex flex-col custom-scrollbar pointer-events-none">
                                 <h2 className="m-auto text-xl sm:text-2xl md:text-3xl font-bold text-zinc-900 dark:text-white leading-snug">
