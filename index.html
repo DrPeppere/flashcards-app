@@ -92,7 +92,6 @@
         const { useState, useEffect, useRef, useMemo } = React;
 
         // --- GITHUB CONFIGURATION ---
-        // ONLY YOU (THE OWNER) NEED TO CHANGE THIS.
         const GITHUB_USER = "DrPeppere"; 
         const GITHUB_REPO = "flashcard-databank";
         const GITHUB_BASE = `https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/main/`;
@@ -155,7 +154,7 @@
             const [editingDeckId, setEditingDeckId] = useState(null);
             const [editDeckName, setEditDeckName] = useState('');
 
-            // Library State (GitHub Database relative fetching)
+            // Library State (GitHub Database)
             const [libraryDecks, setLibraryDecks] = useState([]);
             const [isLibraryLoading, setIsLibraryLoading] = useState(false);
             const [libraryError, setLibraryError] = useState('');
@@ -323,41 +322,22 @@
                 if (file) processFile(file);
             };
 
-            // Safely fetch library with fallback
+            // Safely fetch library explicitly from GitHub Base
             const fetchLibrary = async () => {
+                if (GITHUB_USER === "YOUR_USERNAME") return; 
                 setIsLibraryLoading(true);
                 setLibraryError('');
                 try {
-                    let catalogData = null;
-                    
-                    // Try relative fetch first ONLY if we are in a proper HTTP context
-                    if (window.location.protocol.startsWith('http')) {
-                        try {
-                            const response = await fetch('./catalog.json');
-                            if (response.ok) {
-                                catalogData = await response.json();
-                            }
-                        } catch (e) {
-                            // ignore relative fetch failure, proceed to fallback
-                        }
+                    // We bypass relative paths completely to prevent Blob/Local fetch errors
+                    const response = await fetch(GITHUB_BASE + 'catalog.json');
+                    if (!response.ok) {
+                         throw new Error("Could not find catalog.json in your repo.");
                     }
-
-                    // Fallback to GitHub repo if local failed or if we are on a local file://
-                    if (!catalogData && GITHUB_USER !== "YOUR_USERNAME") {
-                        const response = await fetch(GITHUB_BASE + 'catalog.json');
-                        if (response.ok) {
-                            catalogData = await response.json();
-                        }
-                    }
-
-                    if (catalogData) {
-                        setLibraryDecks(catalogData);
-                    } else {
-                        throw new Error("Could not find catalog.");
-                    }
+                    const catalog = await response.json();
+                    setLibraryDecks(catalog);
                 } catch (err) {
                     console.error(err);
-                    setLibraryError("Couldn't connect to library. Ensure catalog.json exists.");
+                    setLibraryError("Couldn't connect to GitHub library.");
                 } finally {
                     setIsLibraryLoading(false);
                 }
@@ -366,31 +346,10 @@
             const installLibraryDeck = async (libraryDeck) => {
                 setIsInstalling(libraryDeck.file);
                 try {
-                    let rawCards = null;
-
-                    // Try relative fetch first
-                    if (window.location.protocol.startsWith('http')) {
-                        try {
-                            const response = await fetch('./' + libraryDeck.file);
-                            if (response.ok) {
-                                rawCards = await response.json();
-                            }
-                        } catch (e) {
-                            // ignore relative fetch failure
-                        }
-                    }
-
-                    // Fallback to GitHub repo
-                    if (!rawCards && GITHUB_USER !== "YOUR_USERNAME") {
-                        const response = await fetch(GITHUB_BASE + libraryDeck.file);
-                        if (response.ok) {
-                            rawCards = await response.json();
-                        }
-                    }
-
-                    if (!rawCards) {
-                        throw new Error("File not found or unreachable.");
-                    }
+                    // Fetch exclusively from the Github repo
+                    const response = await fetch(GITHUB_BASE + libraryDeck.file);
+                    if (!response.ok) throw new Error("File not found");
+                    const rawCards = await response.json();
                     
                     const formattedCards = rawCards.map((c, i) => ({
                         id: `card_${Date.now()}_${Math.random().toString(36).substring(2,7)}_${i}`,
@@ -418,8 +377,8 @@
                         localStorage.setItem('flashcard_decks', JSON.stringify(updated));
                         return updated;
                     });
-
-                    // Success! App remains on dashboard.
+                    
+                    // Stay on dashboard visually
                 } catch (err) {
                     alert("Failed to install deck: " + err.message);
                 } finally {
@@ -586,7 +545,7 @@ cardsData.forEach(card => {
                 setShowCombineModal(false);
                 setDecksToCombine([]);
                 setCombineDeckName('');
-                // Success! App remains on dashboard.
+                // Stays on dashboard
             };
 
             const handleCreateDeck = () => {
@@ -612,7 +571,7 @@ cardsData.forEach(card => {
 
                 setShowCreateDeckModal(false);
                 setNewDeckDetails({ name: '', subj: '', doc: '' });
-                // Success! App remains on dashboard.
+                // Stays on dashboard
             };
 
             const deleteDeck = (id, e) => {
@@ -696,7 +655,7 @@ cardsData.forEach(card => {
                         return updated;
                     });
 
-                    // Success! App remains on dashboard.
+                    // Stays on dashboard
 
                 } catch (err) {
                     setError(err.message || 'Failed to parse the file. Ensure it is formatted correctly.');
@@ -1148,7 +1107,7 @@ cardsData.forEach(card => {
                                 
                                 <div className="text-center mt-2">
                                     <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">v2.5 Full Edition</p>
-                                    <p className="text-[9px] text-zinc-400 mt-1 truncate italic">DB: Local/Relative (Same Repo)</p>
+                                    <p className="text-[9px] text-zinc-400 mt-1 truncate italic">DB: github.com/{GITHUB_USER}/{GITHUB_REPO}</p>
                                 </div>
 
                                 <div>
@@ -1278,7 +1237,7 @@ cardsData.forEach(card => {
                         </div>
                     )}
 
-                    {/* Upload Section */}
+                    {/* Upload / Create Section */}
                     <div className="w-full max-w-xl bg-white dark:bg-zinc-900 rounded-2xl shadow-xl p-8 border border-zinc-200 dark:border-zinc-800 transition-colors duration-300 mb-8">
                     <div className="flex items-center justify-between mb-8">
                         <div>
@@ -1348,12 +1307,12 @@ cardsData.forEach(card => {
                     )}
                     </div>
 
-                    {/* Explore Library (Relative Fetching) */}
-                    <div className="w-full max-w-xl bg-white dark:bg-zinc-900 rounded-2xl shadow-xl p-8 border border-zinc-200 dark:border-zinc-800 transition-colors duration-300">
+                    {/* Explore Library (GitHub Integrated) */}
+                    <div className="w-full max-w-xl bg-white dark:bg-zinc-900 rounded-2xl shadow-xl p-8 border border-zinc-200 dark:border-zinc-800 mb-8 transition-colors duration-300">
                         <div className="flex items-center justify-between mb-6">
                             <div>
                                 <h2 className="text-xl font-bold text-zinc-900 dark:text-white">Explore Library</h2>
-                                <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-1">Preset decks from this repository</p>
+                                <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-1">Preset decks from GitHub Database</p>
                             </div>
                             <button 
                                 onClick={fetchLibrary} 
@@ -1395,10 +1354,11 @@ cardsData.forEach(card => {
                             </div>
                         ) : (
                             <div className="text-center py-4 text-zinc-500 text-sm italic">
-                                No decks found in the library catalog. Add a catalog.json file to your repo.
+                                {GITHUB_USER === "YOUR_USERNAME" ? "Set your GitHub username in the code to see library decks." : "No decks found in the library catalog."}
                             </div>
                         )}
                     </div>
+
                 </div>
                 );
             }
