@@ -89,6 +89,12 @@
     <script type="text/babel">
         const { useState, useEffect, useRef, useMemo } = React;
 
+        // --- GITHUB CONFIGURATION ---
+        // ONLY YOU (THE OWNER) NEED TO CHANGE THIS.
+        const GITHUB_USER = "YOUR_USERNAME"; 
+        const GITHUB_REPO = "flashcard-databank";
+        const GITHUB_BASE = `https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/main/`;
+
         // --- SVGs / Icons ---
         const Icon = ({ children, size = 24, fill = "none", stroke = "currentColor", className = "" }) => (
             <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke={stroke} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -147,6 +153,12 @@
             const [editingDeckId, setEditingDeckId] = useState(null);
             const [editDeckName, setEditDeckName] = useState('');
 
+            // Library State (GitHub Database)
+            const [libraryDecks, setLibraryDecks] = useState([]);
+            const [isLibraryLoading, setIsLibraryLoading] = useState(false);
+            const [libraryError, setLibraryError] = useState('');
+            const [isInstalling, setIsInstalling] = useState(null);
+
             // Load saved decks from localStorage on initialization
             const [savedDecks, setSavedDecks] = useState(() => {
                 const saved = localStorage.getItem('flashcard_decks');
@@ -191,6 +203,11 @@
                 }
                 localStorage.setItem('flashcard_theme', theme);
             }, [theme]);
+
+            // Fetch Library from GitHub on mount
+            useEffect(() => {
+                fetchLibrary();
+            }, []);
 
             // Clear transient review queue when switching decks or folders
             useEffect(() => {
@@ -302,6 +319,65 @@
             const handleFileInput = (e) => {
                 const file = e.target.files[0];
                 if (file) processFile(file);
+            };
+
+            const fetchLibrary = async () => {
+                if (GITHUB_USER === "YOUR_USERNAME") return; // Skip if user hasn't configured it
+                setIsLibraryLoading(true);
+                setLibraryError('');
+                try {
+                    const response = await fetch(GITHUB_BASE + 'catalog.json');
+                    if (!response.ok) throw new Error("Could not find catalog.json in your repo.");
+                    const catalog = await response.json();
+                    setLibraryDecks(catalog);
+                } catch (err) {
+                    console.error(err);
+                    setLibraryError("Couldn't connect to GitHub library.");
+                } finally {
+                    setIsLibraryLoading(false);
+                }
+            };
+
+            const installLibraryDeck = async (libraryDeck) => {
+                setIsInstalling(libraryDeck.file);
+                try {
+                    const response = await fetch(GITHUB_BASE + libraryDeck.file);
+                    const rawCards = await response.json();
+                    
+                    const formattedCards = rawCards.map((c, i) => ({
+                        id: `card_${Date.now()}_${Math.random().toString(36).substring(2,7)}_${i}`,
+                        subj: libraryDeck.subject,
+                        doc: libraryDeck.doc,
+                        sec: c.sec || '',
+                        q: c.q || '',
+                        a: c.a || ''
+                    }));
+
+                    const newDeck = {
+                        id: 'deck_' + Date.now(),
+                        name: libraryDeck.name,
+                        subjectLabel: libraryDeck.subject,
+                        docLabel: libraryDeck.doc,
+                        cards: formattedCards,
+                        folders: [{ id: 'favorites', name: 'Favorites', cards: [] }],
+                        mastered: [],
+                        currentIndex: 0,
+                        lastAccessed: Date.now()
+                    };
+
+                    setSavedDecks(prev => {
+                        const updated = [newDeck, ...prev];
+                        localStorage.setItem('flashcard_decks', JSON.stringify(updated));
+                        return updated;
+                    });
+
+                    // Automatically load the newly installed deck
+                    loadDeck(newDeck);
+                } catch (err) {
+                    alert("Failed to install deck: " + err.message);
+                } finally {
+                    setIsInstalling(null);
+                }
             };
 
             const loadDeck = (deck) => {
@@ -1022,6 +1098,11 @@ cardsData.forEach(card => {
                                         {theme === 'dark' ? <><Sun size={18}/> Light Mode</> : <><Moon size={18}/> Dark Mode</>}
                                     </button>
                                 </div>
+                                
+                                <div className="text-center mt-2">
+                                    <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">v2.5 Full Edition</p>
+                                    <p className="text-[9px] text-zinc-400 mt-1 truncate italic">DB: github.com/{GITHUB_USER}/{GITHUB_REPO}</p>
+                                </div>
 
                                 <div>
                                     <h3 className="font-bold text-zinc-900 dark:text-white mb-3">Installation Guide</h3>
@@ -1149,6 +1230,58 @@ cardsData.forEach(card => {
                             </div>
                         </div>
                     )}
+
+                    {/* Explore Library (GitHub Integrated) */}
+                    <div className="w-full max-w-xl bg-white dark:bg-zinc-900 rounded-2xl shadow-xl p-8 border border-zinc-200 dark:border-zinc-800 mb-8 transition-colors duration-300">
+                        <div className="flex items-center justify-between mb-6">
+                            <div>
+                                <h2 className="text-xl font-bold text-zinc-900 dark:text-white">Explore Library</h2>
+                                <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-1">Preset decks from GitHub</p>
+                            </div>
+                            <button 
+                                onClick={fetchLibrary} 
+                                className={`p-2 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-400 ${isLibraryLoading ? 'animate-spin' : ''}`}
+                            >
+                                <RefreshCw size={18}/>
+                            </button>
+                        </div>
+                        
+                        {libraryError ? (
+                            <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl text-red-500 text-sm flex gap-3 items-center">
+                                <AlertCircle size={20}/> {libraryError}
+                            </div>
+                        ) : isLibraryLoading ? (
+                            <div className="space-y-3">
+                                <div className="h-16 bg-zinc-100 dark:bg-zinc-800 rounded-xl animate-pulse"></div>
+                                <div className="h-16 bg-zinc-100 dark:bg-zinc-800 rounded-xl animate-pulse"></div>
+                            </div>
+                        ) : libraryDecks.length > 0 ? (
+                            <div className="grid gap-3">
+                                {libraryDecks.map(deck => (
+                                    <div key={deck.file} className="p-4 border border-zinc-200 dark:border-zinc-800 rounded-xl flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-950/30 group hover:border-zinc-400 transition-colors">
+                                        <div>
+                                            <h4 className="font-bold text-sm text-zinc-800 dark:text-zinc-200">{deck.name}</h4>
+                                            <div className="flex gap-3 text-[10px] text-zinc-500 uppercase font-bold mt-0.5">
+                                                <span>{deck.subject}</span>
+                                                <span>{deck.doc}</span>
+                                            </div>
+                                        </div>
+                                        <button 
+                                            onClick={() => installLibraryDeck(deck)} 
+                                            disabled={isInstalling === deck.file}
+                                            className="px-4 py-2 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 text-xs font-bold rounded-lg shadow-sm hover:scale-105 transition-transform disabled:opacity-50"
+                                        >
+                                            {isInstalling === deck.file ? 'Installing...' : 'Install'}
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="text-center py-4 text-zinc-500 text-sm italic">
+                                {GITHUB_USER === "YOUR_USERNAME" ? "Set your GitHub username in the code to see library decks." : "No decks found in the library catalog."}
+                            </div>
+                        )}
+                    </div>
 
                     {/* Upload Section */}
                     <div className="w-full max-w-xl bg-white dark:bg-zinc-900 rounded-2xl shadow-xl p-8 border border-zinc-200 dark:border-zinc-800 transition-colors duration-300">
@@ -1398,48 +1531,6 @@ cardsData.forEach(card => {
                     </button>
                     </div>
                     
-                    <div className="flex flex-col p-3 gap-3 border-b border-zinc-200 dark:border-zinc-800 transition-colors duration-300">
-                        <div className="flex gap-2">
-                            <button 
-                                onClick={() => { setFilter('all'); setSlideDirection('none'); setCurrentIndex(0); setIsFlipped(false); }}
-                                className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-md transition-colors ${filter === 'all' ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white' : 'text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200'}`}
-                            >
-                                Study All
-                            </button>
-                            <button 
-                                onClick={() => { setFilter('mastered'); setSlideDirection('none'); setCurrentIndex(0); setIsFlipped(false); }}
-                                className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-md transition-colors ${filter === 'mastered' ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white' : 'text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200'}`}
-                            >
-                                Known ({mastered.length})
-                            </button>
-                        </div>
-                        <select
-                            value={filter !== 'all' && filter !== 'mastered' ? filter : ''}
-                            onChange={(e) => {
-                                if (e.target.value) {
-                                    setFilter(e.target.value);
-                                    setSlideDirection('next');
-                                    setCurrentIndex(0);
-                                    setIsFlipped(false);
-                                }
-                            }}
-                            className={`w-full py-2 px-3 text-sm font-bold rounded-lg outline-none transition-colors border ${filter !== 'all' && filter !== 'mastered' ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white border-zinc-300 dark:border-zinc-600' : 'bg-transparent text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800/50'}`}
-                        >
-                            <option value="" disabled>Select Folder...</option>
-                            {folders.map(f => (
-                                <option key={f.id} value={f.id}>
-                                    📁 {f.name} ({f.cards.filter(id => !mastered.includes(id)).length})
-                                </option>
-                            ))}
-                        </select>
-                        <button
-                            onClick={() => setIsSidebarOpen(false) || setShowFolderModal(true)}
-                            className="w-full mt-1 py-1.5 px-3 text-xs font-bold rounded-lg text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-800 transition-colors flex items-center justify-center gap-2 border border-dashed border-zinc-300 dark:border-zinc-700"
-                        >
-                            <Settings size={14} /> Manage Folders
-                        </button>
-                    </div>
-
                     <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
                     {activeCards.length === 0 ? (
                         <div className="p-4 text-center text-sm text-zinc-500 mt-4">
@@ -1732,7 +1823,7 @@ cardsData.forEach(card => {
                                 </button>
                                 <button 
                                     onClick={(e) => { e.stopPropagation(); toggleCardInFolder('favorites', activeIdForActions); }}
-                                    className={`p-2 rounded-full transition-colors ${isFav ? 'text-amber-500 dark:text-amber-400 bg-amber-100 dark:bg-amber-500/20 hover:bg-amber-100 dark:hover:bg-amber-500/30' : 'text-zinc-400 hover:text-zinc-900 hover:bg-zinc-200 dark:text-zinc-500 dark:hover:text-zinc-300 dark:hover:bg-zinc-700'}`}
+                                    className={`p-2 rounded-full transition-colors ${isFav ? 'text-amber-500 dark:text-amber-400 bg-amber-100 dark:bg-amber-500/20 hover:bg-amber-200 dark:hover:bg-amber-500/30' : 'text-zinc-400 hover:text-zinc-900 hover:bg-zinc-200 dark:text-zinc-500 dark:hover:text-zinc-300 dark:hover:bg-zinc-700'}`}
                                     title={isFav ? "Remove from Favorites" : "Add to Favorites"}
                                 >
                                     <Star size={22} fill={isFav ? "currentColor" : "none"} />
