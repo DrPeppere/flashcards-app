@@ -72,6 +72,15 @@
         .dark .custom-scrollbar::-webkit-scrollbar-thumb {
             background-color: #3f3f46;
         }
+
+        /* Hide scrollbar completely for horizontal tab list */
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .hide-scrollbar {
+            -ms-overflow-style: none;  /* IE and Edge */
+            scrollbar-width: none;  /* Firefox */
+        }
     </style>
 </head>
 <body class="bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-200 transition-colors duration-300">
@@ -110,6 +119,10 @@
         const Moon = ({size, className}) => <Icon size={size} className={className}><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></Icon>;
         const Smartphone = ({size, className}) => <Icon size={size} className={className}><rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></Icon>;
         const Monitor = ({size, className}) => <Icon size={size} className={className}><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></Icon>;
+        const Plus = ({size, className}) => <Icon size={size} className={className}><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></Icon>;
+        const RefreshCw = ({size, className}) => <Icon size={size} className={className}><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></Icon>;
+        const Download = ({size, className}) => <Icon size={size} className={className}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></Icon>;
+        const Layers = ({size, className}) => <Icon size={size} className={className}><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></Icon>;
 
         // --- Main App Component ---
         function App() {
@@ -120,6 +133,19 @@
                 return localStorage.getItem('flashcard_theme') || 'dark';
             });
             const [showSettingsModal, setShowSettingsModal] = useState(false);
+            const [showCreateDeckModal, setShowCreateDeckModal] = useState(false);
+            const [newDeckDetails, setNewDeckDetails] = useState({ name: '', subj: '', doc: '' });
+
+            // Combine Deck State
+            const [showCombineModal, setShowCombineModal] = useState(false);
+            const [decksToCombine, setDecksToCombine] = useState([]); // Array of deck IDs to merge
+            const [combineDeckName, setCombineDeckName] = useState('');
+            const combineDragItem = useRef(null);
+            const combineDragOverItem = useRef(null);
+
+            // Rename Deck State
+            const [editingDeckId, setEditingDeckId] = useState(null);
+            const [editDeckName, setEditDeckName] = useState('');
 
             // Load saved decks from localStorage on initialization
             const [savedDecks, setSavedDecks] = useState(() => {
@@ -132,7 +158,7 @@
             // Manage folders (Favorites is just the default folder)
             const [folders, setFolders] = useState([]); 
             const [mastered, setMastered] = useState([]); // Array of mastered card IDs
-            const [filter, setFilter] = useState('all'); // 'all', 'mastered', or 'folder_{id}'
+            const [filter, setFilter] = useState('all'); // 'all', 'mastered', or folder id
             const [isSidebarOpen, setIsSidebarOpen] = useState(false);
             const [subjectLabel, setSubjectLabel] = useState('PHYS');
             const [docLabel, setDocLabel] = useState('CH10_12_SG');
@@ -144,9 +170,13 @@
             const [isDragging, setIsDragging] = useState(false);
             
             const [editingCard, setEditingCard] = useState(null); // Holds the card currently being edited
-            const [showFolderModal, setShowFolderModal] = useState(false); // Controls the manage folders modal
-            const [targetFolders, setTargetFolders] = useState([]); // Folders set as default for quick-save
+            const [showFolderModal, setShowFolderModal] = useState(false); // Controls the "Manage folders" modal
+            const [savingCardId, setSavingCardId] = useState(null); // Controls the "Save to folder" modal for a specific card
             const [newFolderName, setNewFolderName] = useState('');
+            const [reviewItems, setReviewItems] = useState([]); // Queue for "Try Again" functionality
+
+            // Drag Over Target ID for Header Tabs
+            const [dragOverFolderId, setDragOverFolderId] = useState(null);
 
             // Drag and drop sorting refs
             const dragItem = useRef(null);
@@ -162,9 +192,14 @@
                 localStorage.setItem('flashcard_theme', theme);
             }, [theme]);
 
+            // Clear transient review queue when switching decks or folders
+            useEffect(() => {
+                setReviewItems([]);
+            }, [filter, currentDeckId]);
+
             // Auto-save progress and card data to localStorage whenever it changes
             useEffect(() => {
-                if (currentDeckId && allCards.length > 0) {
+                if (currentDeckId) { // Only require currentDeckId, allCards can be empty!
                     setSavedDecks(prevDecks => {
                         const updatedDecks = prevDecks.map(deck => {
                             if (deck.id === currentDeckId) {
@@ -172,7 +207,6 @@
                                     ...deck, 
                                     currentIndex, 
                                     folders,
-                                    targetFolders,
                                     mastered,
                                     cards: allCards, // Save any edits to the cards
                                     lastAccessed: Date.now()
@@ -184,33 +218,54 @@
                         return updatedDecks;
                     });
                 }
-            }, [currentIndex, folders, targetFolders, mastered, currentDeckId, allCards]);
+            }, [currentIndex, folders, mastered, currentDeckId, allCards]);
 
-            // Determine active cards based on current filter state (maintaining custom sorted folder order)
+            // Determine active cards based on current filter state and review queue
             const activeCards = useMemo(() => {
                 if (filter === 'mastered') {
                     return allCards.filter(c => mastered.includes(c.id));
                 }
-                if (filter.startsWith('folder_')) {
-                    const folderId = filter.split('folder_')[1];
-                    const folder = folders.find(f => f.id === folderId);
+                
+                let base = allCards;
+                if (filter !== 'all' && filter !== 'mastered') {
+                    const folder = folders.find(f => f.id === filter);
                     if (folder) {
-                        // Return cards matching folder order, filtering out mastered
-                        return folder.cards
-                            .filter(id => !mastered.includes(id))
+                        // Return cards matching folder order
+                        base = folder.cards
                             .map(id => allCards.find(c => c.id === id))
                             .filter(Boolean); // Clean out any invalid mappings
                     }
                 }
-                // Default 'all' view
-                return allCards.filter(c => !mastered.includes(c.id));
-            }, [allCards, mastered, filter, folders]);
+                
+                // Default view handling: remove mastered cards from base
+                base = base.filter(c => !mastered.includes(c.id));
+
+                // Dynamically splice in "Try Again" review items based on their designated target indices
+                let merged = [...base];
+                reviewItems.forEach(item => {
+                    const activeId = item.card.originalId || item.card.id;
+                    // If the user has permanently mastered the card, it shouldn't show up in the review queue
+                    if (!mastered.includes(activeId)) {
+                        const idx = Math.min(item.insertAt, merged.length);
+                        merged.splice(idx, 0, item.card);
+                    }
+                });
+
+                return merged;
+            }, [allCards, mastered, filter, folders, reviewItems]);
+
+            // Clamp currentIndex if the activeCards list shrinks
+            useEffect(() => {
+                if (activeCards.length > 0 && currentIndex >= activeCards.length) {
+                    setCurrentIndex(activeCards.length - 1);
+                }
+            }, [activeCards.length, currentIndex]);
 
             // Keyboard navigation
             useEffect(() => {
                 const handleKeyDown = (e) => {
                     // Disable keyboard nav if we aren't studying or if we are actively typing in an edit/folder modal
-                    if (view !== 'study' || editingCard || showSettingsModal || showFolderModal) return; 
+                    if (view !== 'study' || editingCard || showSettingsModal || showFolderModal || savingCardId || showCreateDeckModal || showCombineModal || editingDeckId) return; 
                     
                     if (e.key === 'ArrowRight') {
                         handleNext();
@@ -224,7 +279,7 @@
 
                 window.addEventListener('keydown', handleKeyDown);
                 return () => window.removeEventListener('keydown', handleKeyDown);
-            }, [view, currentIndex, activeCards.length, editingCard, showSettingsModal, showFolderModal]);
+            }, [view, currentIndex, activeCards.length, editingCard, showSettingsModal, showFolderModal, savingCardId, showCreateDeckModal, showCombineModal, editingDeckId]);
 
             // File Upload Handlers
             const handleDragOver = (e) => {
@@ -254,13 +309,12 @@
                 setSubjectLabel(deck.subjectLabel);
                 setDocLabel(deck.docLabel);
                 
-                // Backwards compatibility migration for old decks that only had 'favorites' array
+                // Backwards compatibility migration for old decks
                 const loadedFolders = deck.folders || (
                     deck.favorites ? [{ id: 'favorites', name: 'Favorites', cards: deck.favorites }] : [{ id: 'favorites', name: 'Favorites', cards: [] }]
                 );
                 
                 setFolders(loadedFolders);
-                setTargetFolders(deck.targetFolders || []);
                 setMastered(deck.mastered || []);
                 setCurrentIndex(deck.currentIndex || 0);
                 setCurrentDeckId(deck.id);
@@ -274,6 +328,168 @@
                     localStorage.setItem('flashcard_decks', JSON.stringify(updated));
                     return updated;
                 });
+            };
+
+            // Export logic converting back to HTML string
+            const handleExportDeck = (deck, e) => {
+                e.stopPropagation();
+                
+                const cardsJSON = deck.cards.map((c, i) => ({
+                    id: i + 1, // Reset integers for neatness when exported
+                    subj: c.subj || deck.subjectLabel || "SUBJ",
+                    doc: c.doc || deck.docLabel || "DOC",
+                    sec: c.sec || '',
+                    q: c.q || '',
+                    a: c.a || ''
+                }));
+                // Add the expected END marker
+                cardsJSON.push({ id: "END", subj: "END", doc: "END", sec: "END", q: "END", a: "END" });
+
+                const htmlContent = `<!DOCTYPE html><html><head><title>${deck.name}</title><style>
+    body { font-family: sans-serif; margin: 20px; background-color: #f4f4f9; color: #333; }
+    h1 { text-align: center; }
+    table { width: 100%; border-collapse: collapse; margin-top: 20px; background-color: #fff; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+    th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+    th { background-color: #0056b3; color: white; position: sticky; top: 0; }
+    tr:nth-child(even) { background-color: #f9f9f9; }
+    .meta-col { width: 8%; font-family: monospace; font-size: 0.9em; text-align: center; }
+    .content-col { width: 34%; }
+</style></head><body><h1>${deck.name}</h1><table id="flashcardTable">
+    <thead>
+        <tr>
+            <th class="meta-col">ID (Top-L)</th>
+            <th class="meta-col">Subject (Top-R)</th>
+            <th class="meta-col">Doc (Bot-L)</th>
+            <th class="meta-col">Section (Bot-R)</th>
+            <th class="content-col">Question (Front)</th>
+            <th class="content-col">Answer (Back)</th>
+        </tr>
+    </thead>
+    <tbody>
+    </tbody></table><script>
+const cardsData = ${JSON.stringify(cardsJSON, null, 4)};
+
+const tbody = document.querySelector('#flashcardTable tbody');
+cardsData.forEach(card => {
+    const row = document.createElement('tr');
+    row.innerHTML = \`
+        <td class="meta-col"><strong>\${card.id}</strong></td>
+        <td class="meta-col">\${card.subj}</td>
+        <td class="meta-col">\${card.doc}</td>
+        <td class="meta-col">\${card.sec}</td>
+        <td class="content-col">\${card.q}</td>
+        <td class="content-col">\${card.a}</td>
+    \`;
+    tbody.appendChild(row);
+});
+<\/script></body></html>`;
+
+                const blob = new Blob([htmlContent], { type: 'text/html' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${deck.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.html`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            };
+
+            const startEditingDeck = (deck, e) => {
+                e.stopPropagation();
+                setEditingDeckId(deck.id);
+                setEditDeckName(deck.name);
+            };
+
+            const saveDeckName = (e) => {
+                e.stopPropagation();
+                if (editDeckName.trim()) {
+                    setSavedDecks(prev => {
+                        const updated = prev.map(d => d.id === editingDeckId ? { ...d, name: editDeckName.trim() } : d);
+                        localStorage.setItem('flashcard_decks', JSON.stringify(updated));
+                        return updated;
+                    });
+                }
+                setEditingDeckId(null);
+            };
+
+            const handleCombineSort = () => {
+                if (combineDragItem.current === null || combineDragOverItem.current === null) return;
+                if (combineDragItem.current === combineDragOverItem.current) return;
+
+                const newOrder = [...decksToCombine];
+                const draggedItem = newOrder.splice(combineDragItem.current, 1)[0];
+                newOrder.splice(combineDragOverItem.current, 0, draggedItem);
+                
+                setDecksToCombine(newOrder);
+                combineDragItem.current = null;
+                combineDragOverItem.current = null;
+            };
+
+            const handleCombineSubmit = () => {
+                if (!combineDeckName.trim() || decksToCombine.length < 2) return;
+                
+                let combinedCards = [];
+                decksToCombine.forEach(deckId => {
+                    const deck = savedDecks.find(d => d.id === deckId);
+                    if (deck && deck.cards) {
+                        // Re-mint IDs to avoid duplicate ID conflicts
+                        const freshCards = deck.cards.map((c, i) => ({
+                            ...c,
+                            id: `card_${Date.now()}_${Math.random().toString(36).substring(2,9)}_${i}`
+                        }));
+                        combinedCards = [...combinedCards, ...freshCards];
+                    }
+                });
+
+                const newDeck = {
+                    id: 'deck_' + Date.now(),
+                    name: combineDeckName.trim(),
+                    subjectLabel: savedDecks.find(d => d.id === decksToCombine[0])?.subjectLabel || 'MIXED',
+                    docLabel: savedDecks.find(d => d.id === decksToCombine[0])?.docLabel || 'COMBINED',
+                    cards: combinedCards,
+                    folders: [{ id: 'favorites', name: 'Favorites', cards: [] }],
+                    mastered: [],
+                    currentIndex: 0,
+                    lastAccessed: Date.now()
+                };
+
+                setSavedDecks(prev => {
+                    const updated = [newDeck, ...prev];
+                    localStorage.setItem('flashcard_decks', JSON.stringify(updated));
+                    return updated;
+                });
+
+                setShowCombineModal(false);
+                setDecksToCombine([]);
+                setCombineDeckName('');
+                loadDeck(newDeck);
+            };
+
+            const handleCreateDeck = () => {
+                if (!newDeckDetails.name.trim()) return;
+                
+                const newDeck = {
+                    id: 'deck_' + Date.now(),
+                    name: newDeckDetails.name.trim(),
+                    subjectLabel: newDeckDetails.subj.trim() || 'SUBJ',
+                    docLabel: newDeckDetails.doc.trim() || 'DOC',
+                    cards: [],
+                    folders: [{ id: 'favorites', name: 'Favorites', cards: [] }],
+                    mastered: [],
+                    currentIndex: 0,
+                    lastAccessed: Date.now()
+                };
+
+                setSavedDecks(prev => {
+                    const updated = [newDeck, ...prev];
+                    localStorage.setItem('flashcard_decks', JSON.stringify(updated));
+                    return updated;
+                });
+
+                setShowCreateDeckModal(false);
+                setNewDeckDetails({ name: '', subj: '', doc: '' });
+                loadDeck(newDeck);
             };
 
             const deleteDeck = (id, e) => {
@@ -303,31 +519,41 @@
                 reader.onload = (e) => {
                 const content = e.target.result;
                 try {
+                    // 1. Find the start of the array
                     const arrayStartIndicator = 'const cardsData = [';
                     const startIdx = content.indexOf(arrayStartIndicator);
                     if (startIdx === -1) throw new Error("Could not find 'cardsData' array in the file.");
                     
-                    const endIdx = content.indexOf('const subjectLabel =', startIdx);
+                    // 2. Find the end of the array 
+                    const endIdx = content.indexOf('];', startIdx);
                     if (endIdx === -1) throw new Error("Could not find the end of the 'cardsData' array.");
 
-                    let arrayString = content.substring(startIdx + arrayStartIndicator.length - 1, endIdx).trim();
-                    if (arrayString.endsWith(';')) {
-                        arrayString = arrayString.slice(0, -1);
-                    }
+                    // Extract just the array string e.g. "[{...}, {...}]"
+                    let arrayString = content.substring(startIdx + arrayStartIndicator.length - 1, endIdx + 1).trim();
 
-                    const parsedCards = new Function('return ' + arrayString)();
+                    // 3. Parse the array into Javascript objects
+                    const parsedCardsRaw = new Function('return ' + arrayString)();
                     
-                    if (!Array.isArray(parsedCards) || parsedCards.length === 0) {
+                    if (!Array.isArray(parsedCardsRaw) || parsedCardsRaw.length === 0) {
                         throw new Error("The extracted data is not a valid array of flashcards.");
                     }
 
-                    const parsedCardsWithIds = parsedCards.map((c, i) => ({ ...c, id: `card_${Date.now()}_${i}` }));
+                    // 4. Filter out the "END" dummy card
+                    const validCards = parsedCardsRaw.filter(c => c.id !== "END" && c.q !== "END");
+                    
+                    if (validCards.length === 0) {
+                         throw new Error("No valid flashcards found in the file.");
+                    }
 
-                    const subjectMatch = content.match(/const\s+subjectLabel\s*=\s*["']([^"']+)["']/);
-                    const docMatch = content.match(/const\s+docLabel\s*=\s*["']([^"']+)["']/);
+                    // 5. Overwrite the integer id with a unique string for the app's internal logic
+                    const parsedCardsWithIds = validCards.map((c, i) => ({ 
+                        ...c, 
+                        id: `card_${Date.now()}_${i}` 
+                    }));
 
-                    const newSubjectLabel = subjectMatch ? subjectMatch[1] : 'SUBJ';
-                    const newDocLabel = docMatch ? docMatch[1] : 'DOC';
+                    // 6. Extract the labels from the very first valid card
+                    const newSubjectLabel = validCards[0].subj || 'SUBJ';
+                    const newDocLabel = validCards[0].doc || 'DOC';
 
                     const newDeck = {
                         id: 'deck_' + Date.now(),
@@ -336,7 +562,6 @@
                         docLabel: newDocLabel,
                         cards: parsedCardsWithIds,
                         folders: [{ id: 'favorites', name: 'Favorites', cards: [] }], // Default folder config
-                        targetFolders: [],
                         mastered: [],
                         currentIndex: 0,
                         lastAccessed: Date.now()
@@ -393,31 +618,75 @@
                     }
                 }
             };
+            
+            const handleTryAgain = (e) => {
+                e.stopPropagation();
+                // Ensure we handle currentCard correctly even if it's already a review card
+                const baseCardId = activeCards[currentIndex]?.originalId || activeCards[currentIndex]?.id;
+                
+                setReviewItems(prev => {
+                    const newItems = [...prev, {
+                        card: { 
+                            ...activeCards[currentIndex], 
+                            isReview: true, 
+                            originalId: baseCardId, 
+                            id: `review_${Date.now()}_${Math.random().toString(36).substring(2, 9)}` 
+                        },
+                        insertAt: currentIndex + 6 // Appears exactly 5 cards from current
+                    }];
+                    return newItems.sort((a, b) => a.insertAt - b.insertAt);
+                });
+                
+                // Instantly advance since hitting Try Again acts as acknowledging the card
+                setSlideDirection('next');
+                setIsFlipped(false);
+                setCurrentIndex(prev => prev + 1);
+            };
 
             // Drag and Drop Sort within Sidebar
             const handleSort = () => {
                 if (dragItem.current === null || dragOverItem.current === null) return;
                 if (dragItem.current === dragOverItem.current) return;
-                if (!filter.startsWith('folder_')) return;
-
-                const folderId = filter.split('folder_')[1];
-                const folderIndex = folders.findIndex(f => f.id === folderId);
-                if (folderIndex === -1) return;
+                if (filter === 'mastered') return; // Changed to allow sorting in 'all' view
 
                 const draggedCard = activeCards[dragItem.current];
                 const dragOverCard = activeCards[dragOverItem.current];
+                
+                // Cannot permanently sort temporary review clones
+                if (draggedCard.isReview || dragOverCard.isReview) {
+                    dragItem.current = null;
+                    dragOverItem.current = null;
+                    return;
+                }
 
-                const newFolders = [...folders];
-                const folderCards = [...newFolders[folderIndex].cards];
+                if (filter === 'all') {
+                    setAllCards(prev => {
+                        const newAll = [...prev];
+                        const draggedIdx = newAll.findIndex(c => c.id === draggedCard.id);
+                        const dragOverIdx = newAll.findIndex(c => c.id === dragOverCard.id);
 
-                const draggedIdxInFolder = folderCards.indexOf(draggedCard.id);
-                const dragOverIdxInFolder = folderCards.indexOf(dragOverCard.id);
+                        if (draggedIdx !== -1 && dragOverIdx !== -1) {
+                            newAll.splice(draggedIdx, 1);
+                            newAll.splice(dragOverIdx, 0, draggedCard);
+                        }
+                        return newAll;
+                    });
+                } else {
+                    const folderIndex = folders.findIndex(f => f.id === filter);
+                    if (folderIndex === -1) return;
 
-                folderCards.splice(draggedIdxInFolder, 1);
-                folderCards.splice(dragOverIdxInFolder, 0, draggedCard.id);
+                    const newFolders = [...folders];
+                    const folderCards = [...newFolders[folderIndex].cards];
 
-                newFolders[folderIndex].cards = folderCards;
-                setFolders(newFolders);
+                    const draggedIdxInFolder = folderCards.indexOf(draggedCard.id);
+                    const dragOverIdxInFolder = folderCards.indexOf(dragOverCard.id);
+
+                    folderCards.splice(draggedIdxInFolder, 1);
+                    folderCards.splice(dragOverIdxInFolder, 0, draggedCard.id);
+
+                    newFolders[folderIndex].cards = folderCards;
+                    setFolders(newFolders);
+                }
 
                 // Re-calculate focus index to keep current card in view
                 let newActiveCards = [...activeCards];
@@ -443,69 +712,101 @@
                     return f;
                 }));
             };
-
-            const toggleTargetFolder = (folderId) => {
-                setTargetFolders(prev => prev.includes(folderId) ? prev.filter(id => id !== folderId) : [...prev, folderId]);
+            
+            // Specifically for dropping cards into folders
+            const addCardToFolder = (folderId, cardId) => {
+                setFolders(prev => prev.map(f => {
+                    if (f.id === folderId) {
+                        if (f.cards.includes(cardId)) return f;
+                        return { ...f, cards: [...f.cards, cardId] };
+                    }
+                    return f;
+                }));
             };
 
-            const handleQuickSave = (cardId, e) => {
-                e.stopPropagation();
-                if (targetFolders.length === 0) {
-                    setShowFolderModal(true); // Open manager if no defaults are set
-                    return;
-                }
-                
-                setFolders(prev => {
-                    const newFolders = [...prev];
-                    // Check if card is in ALL target folders
-                    const isInAll = targetFolders.every(tId => {
-                        const f = newFolders.find(fold => fold.id === tId);
-                        return f && f.cards.includes(cardId);
-                    });
-
-                    targetFolders.forEach(tId => {
-                        const fIndex = newFolders.findIndex(fold => fold.id === tId);
-                        if (fIndex > -1) {
-                            const hasCard = newFolders[fIndex].cards.includes(cardId);
-                            if (isInAll) {
-                                // Remove from all
-                                newFolders[fIndex].cards = newFolders[fIndex].cards.filter(id => id !== cardId);
-                            } else if (!hasCard) {
-                                // Add to all it's missing from
-                                newFolders[fIndex].cards = [...newFolders[fIndex].cards, cardId];
-                            }
-                        }
-                    });
-                    return newFolders;
-                });
-            };
-
-            const createFolder = () => {
+            const createFolderAndSave = (cardIdToSave) => {
                 if (!newFolderName.trim()) return;
                 const newFolderId = 'folder_' + Date.now();
-                const newFolder = { id: newFolderId, name: newFolderName.trim(), cards: [] };
+                const newFolder = { id: newFolderId, name: newFolderName.trim(), cards: cardIdToSave ? [cardIdToSave] : [] };
                 setFolders(prev => [...prev, newFolder]);
                 setNewFolderName('');
-                
-                // Automatically set as a default target if it's the first custom folder
-                if (folders.filter(f => f.id !== 'favorites').length === 0) {
-                    setTargetFolders([newFolderId]);
-                }
             };
 
             const deleteFolder = (id) => {
                 if (window.confirm("Delete this folder?")) {
                     setFolders(folders.filter(f => f.id !== id));
-                    setTargetFolders(prev => prev.filter(t => t !== id));
-                    if (filter === `folder_${id}`) {
+                    if (filter === id) {
                         setFilter('all');
                         setCurrentIndex(0);
                     }
                 }
             };
 
+            const handleAddCard = () => {
+                setEditingCard({
+                    id: `card_${Date.now()}_new`,
+                    subj: subjectLabel,
+                    doc: docLabel,
+                    sec: '',
+                    q: '',
+                    a: '',
+                    isNew: true
+                });
+            };
+
             const saveEditedCard = () => {
-                setAllCards(prev => prev.map(c => c.id === editingCard.id ? editingCard : c));
+                // If they try to save a completely blank card, just cancel
+                if (!editingCard.q.trim() && !editingCard.a.trim()) {
+                    setEditingCard(null);
+                    return;
+                }
+
+                if (editingCard.isNew) {
+                    const { isNew, ...newCard } = editingCard;
+                    
+                    const currentActiveCard = activeCards[currentIndex];
+                    const currentCardId = currentActiveCard?.originalId || currentActiveCard?.id;
+                    
+                    // Insert into allCards directly after the currently viewed card
+                    setAllCards(prev => {
+                        const next = [...prev];
+                        let insertIndex = next.length;
+                        if (currentCardId) {
+                            const idx = next.findIndex(c => c.id === currentCardId);
+                            if (idx !== -1) insertIndex = idx + 1;
+                        }
+                        next.splice(insertIndex, 0, newCard);
+                        return next;
+                    });
+
+                    // If currently studying a specific folder, insert it into that folder's order too
+                    if (filter !== 'all' && filter !== 'mastered') {
+                        setFolders(prev => {
+                            const newFolders = [...prev];
+                            const folderIdx = newFolders.findIndex(f => f.id === filter);
+                            if (folderIdx !== -1) {
+                                const folderCards = [...newFolders[folderIdx].cards];
+                                let insertIdx = folderCards.length;
+                                if (currentCardId) {
+                                    const idxInFolder = folderCards.indexOf(currentCardId);
+                                    if (idxInFolder !== -1) insertIdx = idxInFolder + 1;
+                                }
+                                folderCards.splice(insertIdx, 0, newCard.id);
+                                newFolders[folderIdx].cards = folderCards;
+                            }
+                            return newFolders;
+                        });
+                    }
+
+                    // Advance the view to immediately show the newly added card
+                    if (filter !== 'mastered') {
+                        setSlideDirection('next');
+                        setIsFlipped(false);
+                        setCurrentIndex(prev => activeCards.length === 0 ? 0 : prev + 1);
+                    }
+                } else {
+                    setAllCards(prev => prev.map(c => c.id === editingCard.id ? editingCard : c));
+                }
                 setEditingCard(null);
             };
 
@@ -547,7 +848,7 @@
             };
 
             const handleCardTap = () => {
-                if (!isSwiping.current && !editingCard && !showFolderModal) {
+                if (!isSwiping.current && !editingCard && !showFolderModal && !savingCardId) {
                     setIsFlipped(!isFlipped);
                 }
             };
@@ -556,6 +857,148 @@
                 return (
                 <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-200 p-6 flex flex-col items-center py-12 font-sans overflow-y-auto transition-colors duration-300">
                     
+                    {/* Combine Decks Modal */}
+                    {showCombineModal && (
+                        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 dark:bg-black/80 backdrop-blur-sm" onClick={() => setShowCombineModal(false)}>
+                            <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl w-full max-w-md p-6 flex flex-col gap-4 shadow-2xl transition-colors duration-300" onClick={e => e.stopPropagation()}>
+                                <div className="flex justify-between items-center mb-2">
+                                    <h2 className="text-xl font-bold text-zinc-900 dark:text-white">Merge Decks</h2>
+                                    <button onClick={() => setShowCombineModal(false)} className="text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-white transition-colors">
+                                        <X size={20} />
+                                    </button>
+                                </div>
+
+                                <p className="text-sm text-zinc-600 dark:text-zinc-400">Select multiple decks to combine. Drag to reorder them before merging.</p>
+
+                                {/* Selected Decks List (Draggable) */}
+                                {decksToCombine.length > 0 && (
+                                    <div className="flex flex-col gap-2 p-3 bg-zinc-50 dark:bg-zinc-800/50 rounded-xl border border-zinc-200 dark:border-zinc-700">
+                                        <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Decks to Merge (In Order)</h4>
+                                        {decksToCombine.map((deckId, index) => {
+                                            const d = savedDecks.find(deck => deck.id === deckId);
+                                            return (
+                                                <div 
+                                                    key={deckId}
+                                                    draggable
+                                                    onDragStart={() => { combineDragItem.current = index; }}
+                                                    onDragEnter={() => { combineDragOverItem.current = index; }}
+                                                    onDragEnd={handleCombineSort}
+                                                    onDragOver={e => e.preventDefault()}
+                                                    className="flex items-center justify-between p-2 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-600 rounded-lg shadow-sm cursor-grab active:cursor-grabbing"
+                                                >
+                                                    <div className="flex items-center gap-2 overflow-hidden">
+                                                        <GripVertical size={16} className="text-zinc-400 shrink-0" />
+                                                        <span className="font-medium text-sm truncate text-zinc-800 dark:text-zinc-200">{d?.name}</span>
+                                                    </div>
+                                                    <button onClick={() => setDecksToCombine(prev => prev.filter(id => id !== deckId))} className="p-1 text-zinc-400 hover:text-red-500 rounded">
+                                                        <X size={14} />
+                                                    </button>
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
+                                )}
+
+                                {/* Available Decks */}
+                                <div className="max-h-40 overflow-y-auto custom-scrollbar flex flex-col gap-1 border border-zinc-200 dark:border-zinc-700 rounded-xl p-2">
+                                    {savedDecks.map(deck => (
+                                        <label key={deck.id} className="flex items-center gap-3 p-2 rounded hover:bg-zinc-50 dark:hover:bg-zinc-800/50 cursor-pointer transition-colors">
+                                            <input 
+                                                type="checkbox" 
+                                                checked={decksToCombine.includes(deck.id)} 
+                                                onChange={() => setDecksToCombine(prev => prev.includes(deck.id) ? prev.filter(id => id !== deck.id) : [...prev, deck.id])}
+                                                className="w-4 h-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900 dark:accent-zinc-100"
+                                            />
+                                            <div className="flex flex-col flex-1 overflow-hidden">
+                                                <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200 truncate">{deck.name}</span>
+                                                <span className="text-xs text-zinc-500">{deck.cards.length} cards</span>
+                                            </div>
+                                        </label>
+                                    ))}
+                                </div>
+
+                                <div className="pt-2">
+                                    <label className="block text-sm font-bold text-zinc-600 dark:text-zinc-400 mb-1">New Combined Deck Name</label>
+                                    <input 
+                                        type="text" 
+                                        value={combineDeckName} 
+                                        onChange={e => setCombineDeckName(e.target.value)} 
+                                        placeholder="e.g. Master Biology Deck" 
+                                        className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 rounded-lg p-2.5 text-zinc-900 dark:text-white focus:outline-none focus:border-zinc-500 transition-colors" 
+                                        onKeyDown={e => e.key === 'Enter' && handleCombineSubmit()}
+                                    />
+                                </div>
+                                
+                                <button 
+                                    onClick={handleCombineSubmit} 
+                                    className="mt-2 w-full px-4 py-2.5 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-lg font-bold shadow-sm hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                    disabled={!combineDeckName.trim() || decksToCombine.length < 2}
+                                >
+                                    Merge Decks
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Create Custom Deck Modal */}
+                    {showCreateDeckModal && (
+                        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 dark:bg-black/80 backdrop-blur-sm" onClick={() => setShowCreateDeckModal(false)}>
+                            <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl w-full max-w-sm p-6 flex flex-col gap-4 shadow-2xl transition-colors duration-300" onClick={e => e.stopPropagation()}>
+                                <div className="flex justify-between items-center mb-2">
+                                    <h2 className="text-xl font-bold text-zinc-900 dark:text-white">Create New Deck</h2>
+                                    <button onClick={() => setShowCreateDeckModal(false)} className="text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-white transition-colors">
+                                        <X size={20} />
+                                    </button>
+                                </div>
+                                
+                                <div>
+                                    <label className="block text-sm font-bold text-zinc-600 dark:text-zinc-400 mb-1">Deck Name</label>
+                                    <input 
+                                        autoFocus 
+                                        type="text" 
+                                        value={newDeckDetails.name} 
+                                        onChange={e => setNewDeckDetails({...newDeckDetails, name: e.target.value})} 
+                                        placeholder="e.g. Biology 101" 
+                                        className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 rounded-lg p-2.5 text-zinc-900 dark:text-white focus:outline-none focus:border-zinc-500 transition-colors" 
+                                        onKeyDown={e => e.key === 'Enter' && handleCreateDeck()}
+                                    />
+                                </div>
+                                
+                                <div className="flex gap-3">
+                                    <div className="flex-1">
+                                        <label className="block text-sm font-bold text-zinc-600 dark:text-zinc-400 mb-1">Subject (Top-R)</label>
+                                        <input 
+                                            type="text" 
+                                            value={newDeckDetails.subj} 
+                                            onChange={e => setNewDeckDetails({...newDeckDetails, subj: e.target.value})} 
+                                            placeholder="e.g. BIOL" 
+                                            className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 rounded-lg p-2.5 text-zinc-900 dark:text-white focus:outline-none focus:border-zinc-500 transition-colors" 
+                                        />
+                                    </div>
+                                    <div className="flex-1">
+                                        <label className="block text-sm font-bold text-zinc-600 dark:text-zinc-400 mb-1">Doc (Bot-L)</label>
+                                        <input 
+                                            type="text" 
+                                            value={newDeckDetails.doc} 
+                                            onChange={e => setNewDeckDetails({...newDeckDetails, doc: e.target.value})} 
+                                            placeholder="e.g. CH1" 
+                                            className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 rounded-lg p-2.5 text-zinc-900 dark:text-white focus:outline-none focus:border-zinc-500 transition-colors" 
+                                            onKeyDown={e => e.key === 'Enter' && handleCreateDeck()}
+                                        />
+                                    </div>
+                                </div>
+                                
+                                <button 
+                                    onClick={handleCreateDeck} 
+                                    className="mt-2 w-full px-4 py-2.5 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-lg font-bold shadow-sm hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                    disabled={!newDeckDetails.name.trim()}
+                                >
+                                    Create Empty Deck
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Settings Modal */}
                     {showSettingsModal && (
                         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 dark:bg-black/80 backdrop-blur-sm" onClick={() => setShowSettingsModal(false)}>
@@ -629,7 +1072,7 @@
                                     <BookOpen size={20} className="text-zinc-500 dark:text-zinc-400" />
                                     Continue Studying
                                 </h2>
-                                {allCards.length > 0 && currentDeckId && (
+                                {currentDeckId && (
                                     <button 
                                         onClick={() => setView('study')}
                                         className="text-sm bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-300 px-3 py-1.5 rounded-lg font-medium transition-colors border border-zinc-200 dark:border-zinc-700 shadow-sm"
@@ -643,31 +1086,64 @@
                                 {savedDecks.sort((a, b) => b.lastAccessed - a.lastAccessed).map(deck => (
                                     <div 
                                         key={deck.id}
-                                        onClick={() => loadDeck(deck)}
-                                        className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-zinc-400 dark:hover:border-zinc-600 rounded-xl p-4 cursor-pointer transition-all flex items-center justify-between group shadow-sm hover:shadow-md"
+                                        onClick={() => { if(editingDeckId !== deck.id) loadDeck(deck); }}
+                                        className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-zinc-400 dark:hover:border-zinc-600 rounded-xl p-4 cursor-pointer transition-all flex items-center justify-between group shadow-sm hover:shadow-md min-h-[5rem]"
                                     >
-                                        <div className="flex flex-col">
-                                            <h3 className="font-bold text-zinc-800 dark:text-zinc-200 group-hover:text-black dark:group-hover:text-zinc-100 text-lg mb-1 transition-colors">{deck.name}</h3>
-                                            <div className="flex items-center gap-4 text-xs text-zinc-500 dark:text-zinc-500">
-                                                <span className="flex items-center gap-1"><BookOpen size={12} /> {deck.cards.length} cards</span>
-                                                <span className="flex items-center gap-1">
-                                                    <Clock size={12} /> 
-                                                    {new Date(deck.lastAccessed).toLocaleDateString()}
-                                                </span>
-                                                {deck.currentIndex > 0 && (
-                                                    <span className="text-zinc-600 dark:text-zinc-400 font-medium bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded">
-                                                        Progress: {Math.round((deck.currentIndex / deck.cards.length) * 100)}%
-                                                    </span>
-                                                )}
+                                        {editingDeckId === deck.id ? (
+                                            <div className="flex-1 flex gap-2 items-center" onClick={e => e.stopPropagation()}>
+                                                <input 
+                                                    autoFocus
+                                                    type="text" 
+                                                    value={editDeckName}
+                                                    onChange={e => setEditDeckName(e.target.value)}
+                                                    onKeyDown={e => { if(e.key === 'Enter') saveDeckName(e); if(e.key === 'Escape') setEditingDeckId(null); }}
+                                                    className="flex-1 p-2 bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 rounded-lg text-sm font-bold text-zinc-900 dark:text-white focus:outline-none focus:border-zinc-500"
+                                                />
+                                                <button onClick={saveDeckName} className="px-3 py-2 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 font-bold rounded-lg text-sm">Save</button>
+                                                <button onClick={() => setEditingDeckId(null)} className="p-2 text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"><X size={18}/></button>
                                             </div>
-                                        </div>
-                                        <button 
-                                            onClick={(e) => deleteDeck(deck.id, e)}
-                                            className="p-2 text-zinc-400 dark:text-zinc-600 hover:text-red-500 dark:hover:text-red-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors"
-                                            title="Delete Saved Deck"
-                                        >
-                                            <Trash2 size={18} />
-                                        </button>
+                                        ) : (
+                                            <>
+                                            <div className="flex flex-col flex-1 pr-4 overflow-hidden">
+                                                <h3 className="font-bold text-zinc-800 dark:text-zinc-200 group-hover:text-black dark:group-hover:text-zinc-100 text-lg mb-1 transition-colors truncate">{deck.name}</h3>
+                                                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-zinc-500 dark:text-zinc-500">
+                                                    <span className="flex items-center gap-1 whitespace-nowrap"><BookOpen size={12} /> {deck.cards.length} cards</span>
+                                                    <span className="flex items-center gap-1 whitespace-nowrap">
+                                                        <Clock size={12} /> 
+                                                        {new Date(deck.lastAccessed).toLocaleDateString()}
+                                                    </span>
+                                                    {deck.currentIndex > 0 && deck.cards.length > 0 && (
+                                                        <span className="text-zinc-600 dark:text-zinc-400 font-medium bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded whitespace-nowrap">
+                                                            Progress: {Math.round((deck.currentIndex / deck.cards.length) * 100)}%
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0">
+                                                <button 
+                                                    onClick={(e) => startEditingDeck(deck, e)}
+                                                    className="p-2 text-zinc-400 dark:text-zinc-600 hover:text-blue-500 dark:hover:text-blue-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors"
+                                                    title="Rename Deck"
+                                                >
+                                                    <Edit2 size={18} />
+                                                </button>
+                                                <button 
+                                                    onClick={(e) => handleExportDeck(deck, e)}
+                                                    className="p-2 text-zinc-400 dark:text-zinc-600 hover:text-emerald-500 dark:hover:text-emerald-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors"
+                                                    title="Save/Export to HTML"
+                                                >
+                                                    <Download size={18} />
+                                                </button>
+                                                <button 
+                                                    onClick={(e) => deleteDeck(deck.id, e)}
+                                                    className="p-2 text-zinc-400 dark:text-zinc-600 hover:text-red-500 dark:hover:text-red-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors"
+                                                    title="Delete Saved Deck"
+                                                >
+                                                    <Trash2 size={18} />
+                                                </button>
+                                            </div>
+                                            </>
+                                        )}
                                     </div>
                                 ))}
                             </div>
@@ -678,10 +1154,10 @@
                     <div className="w-full max-w-xl bg-white dark:bg-zinc-900 rounded-2xl shadow-xl p-8 border border-zinc-200 dark:border-zinc-800 transition-colors duration-300">
                     <div className="flex items-center justify-between mb-8">
                         <div>
-                        <h2 className="text-xl font-bold text-zinc-900 dark:text-white">Upload New Deck</h2>
-                        <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-1">Import a new HTML flashcard file</p>
+                        <h2 className="text-xl font-bold text-zinc-900 dark:text-white">Add New Deck</h2>
+                        <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-1">Import, combine, or build your own</p>
                         </div>
-                        {(allCards.length > 0 && currentDeckId && savedDecks.length === 0) && (
+                        {(currentDeckId && savedDecks.length === 0) && (
                         <button 
                             onClick={() => setView('study')}
                             className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white font-medium transition-colors"
@@ -695,26 +1171,45 @@
                         onDragOver={handleDragOver}
                         onDragLeave={handleDragLeave}
                         onDrop={handleDrop}
-                        className={`border-2 border-dashed rounded-xl p-12 flex flex-col items-center justify-center transition-all ${
+                        className={`border-2 border-dashed rounded-xl p-8 sm:p-12 flex flex-col items-center justify-center transition-all ${
                         isDragging ? 'border-blue-500 bg-blue-50 dark:border-zinc-500 dark:bg-zinc-800 scale-[1.02]' : 'border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 hover:bg-zinc-100 dark:hover:bg-zinc-800'
                         }`}
                     >
                         <div className="bg-white dark:bg-zinc-800 p-4 rounded-full shadow-sm mb-4 transition-colors duration-300">
-                        <Upload size={32} className={`${isDragging ? 'text-blue-500 dark:text-zinc-300' : 'text-zinc-400 dark:text-zinc-500'}`} />
+                            <Upload size={32} className={`${isDragging ? 'text-blue-500 dark:text-zinc-300' : 'text-zinc-400 dark:text-zinc-500'}`} />
                         </div>
-                        <p className="text-zinc-900 dark:text-zinc-300 font-medium mb-1 text-center">Drag and drop your HTML file here</p>
-                        <p className="text-zinc-500 dark:text-zinc-500 text-sm mb-6">or click the button below to browse</p>
+                        <p className="text-zinc-500 dark:text-zinc-500 text-sm mb-6 text-center">Drag and drop your HTML file, or choose an option below</p>
                         
-                        <label className="bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 hover:border-zinc-500 dark:hover:border-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-300 text-zinc-700 dark:text-zinc-300 font-semibold py-2.5 px-6 rounded-lg cursor-pointer transition-colors shadow-sm flex items-center gap-2">
-                        <FileCode size={18} />
-                        Browse Files
-                        <input 
-                            type="file" 
-                            accept=".html" 
-                            className="hidden" 
-                            onChange={handleFileInput} 
-                        />
-                        </label>
+                        <div className="flex flex-col sm:flex-row flex-wrap gap-3 w-full max-w-sm mx-auto justify-center">
+                            <label className="flex-1 min-w-[140px] bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 hover:border-zinc-500 dark:hover:border-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-300 text-zinc-700 dark:text-zinc-300 font-semibold py-2.5 px-4 rounded-lg cursor-pointer transition-colors shadow-sm flex items-center justify-center gap-2">
+                                <FileCode size={18} />
+                                Import HTML
+                                <input 
+                                    type="file" 
+                                    accept=".html" 
+                                    className="hidden" 
+                                    onChange={handleFileInput} 
+                                />
+                            </label>
+                            
+                            <button 
+                                onClick={() => setShowCreateDeckModal(true)} 
+                                className="flex-1 min-w-[140px] bg-zinc-900 dark:bg-white border border-zinc-900 dark:border-white hover:bg-zinc-800 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 font-semibold py-2.5 px-4 rounded-lg cursor-pointer transition-colors shadow-sm flex items-center justify-center gap-2"
+                            >
+                                <Plus size={18} />
+                                New Deck
+                            </button>
+                            
+                            {savedDecks.length >= 2 && (
+                                <button 
+                                    onClick={() => setShowCombineModal(true)} 
+                                    className="w-full sm:w-auto flex-1 min-w-[140px] bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-700/50 hover:bg-indigo-100 dark:hover:bg-indigo-800/50 text-indigo-700 dark:text-indigo-300 font-semibold py-2.5 px-4 rounded-lg cursor-pointer transition-colors shadow-sm flex items-center justify-center gap-2"
+                                >
+                                    <Layers size={18} />
+                                    Merge Decks
+                                </button>
+                            )}
+                        </div>
                     </div>
 
                     {error && (
@@ -731,15 +1226,16 @@
             // Study View
             const currentCard = activeCards[currentIndex] || {};
             const progress = activeCards.length > 0 ? ((currentIndex + 1) / activeCards.length) * 100 : 0;
-            const isMastered = currentCard.id ? mastered.includes(currentCard.id) : false;
             
+            // Standardize ID for actions so review clones modify the original source card
+            const activeIdForActions = currentCard.originalId || currentCard.id;
+            
+            const isMastered = activeIdForActions ? mastered.includes(activeIdForActions) : false;
             const favFolder = folders.find(f => f.id === 'favorites');
-            const isFav = favFolder ? favFolder.cards.includes(currentCard.id) : false;
+            const isFav = favFolder ? favFolder.cards.includes(activeIdForActions) : false;
             
-            const isInTarget = targetFolders.length > 0 && targetFolders.every(tId => {
-                const f = folders.find(fold => fold.id === tId);
-                return f && f.cards.includes(currentCard.id);
-            });
+            // Check if card is in ANY custom folder
+            const inCustomFolder = folders.some(f => f.id !== 'favorites' && f.cards.includes(activeIdForActions));
             
             // Conditionally apply class to prevent unwanted animations
             const slideClass = slideDirection === 'next' ? 'anim-next' : slideDirection === 'prev' ? 'anim-prev' : '';
@@ -747,7 +1243,53 @@
             return (
                 <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-200 flex flex-col font-sans transition-colors duration-300">
                 
-                {/* Folder Add/Manage Modal */}
+                {/* Specific Card "Save to Folder" Modal */}
+                {savingCardId && (
+                    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/50 dark:bg-black/80 backdrop-blur-sm" onClick={() => setSavingCardId(null)}>
+                        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl w-full max-w-sm p-6 flex flex-col shadow-2xl transition-colors duration-300" onClick={e => e.stopPropagation()}>
+                            <div className="flex justify-between items-center mb-4">
+                                <h2 className="text-xl font-bold text-zinc-900 dark:text-white">Save to Folder</h2>
+                                <button onClick={() => setSavingCardId(null)} className="text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-white transition-colors">
+                                    <X size={20} />
+                                </button>
+                            </div>
+                            
+                            <div className="max-h-60 overflow-y-auto mb-4 flex flex-col gap-2 p-1 custom-scrollbar">
+                                {folders.filter(f => f.id !== 'favorites').map(f => (
+                                    <label key={f.id} className="flex items-center gap-3 p-3 border border-zinc-200 dark:border-zinc-700 rounded-xl cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors">
+                                        <input 
+                                            type="checkbox" 
+                                            checked={f.cards.includes(savingCardId)} 
+                                            onChange={() => toggleCardInFolder(f.id, savingCardId)}
+                                            className="w-5 h-5 rounded border-zinc-300 dark:border-zinc-600 text-zinc-900 focus:ring-zinc-900 dark:focus:ring-white accent-zinc-900 dark:accent-zinc-100 cursor-pointer"
+                                        />
+                                        <Folder size={18} className="text-zinc-500 dark:text-zinc-400" />
+                                        <span className="font-medium text-zinc-800 dark:text-zinc-200 flex-1">{f.name}</span>
+                                    </label>
+                                ))}
+                                {folders.filter(f => f.id !== 'favorites').length === 0 && (
+                                    <p className="text-sm text-zinc-500 dark:text-zinc-400 text-center py-4">No custom folders yet.</p>
+                                )}
+                            </div>
+
+                            <div className="flex gap-2 pt-4 border-t border-zinc-200 dark:border-zinc-800">
+                                <input 
+                                    type="text"
+                                    value={newFolderName}
+                                    onChange={e => setNewFolderName(e.target.value)}
+                                    placeholder="New folder name..."
+                                    className="flex-1 p-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 rounded-lg text-sm text-zinc-900 dark:text-white focus:outline-none focus:border-zinc-500 transition-colors"
+                                    onKeyDown={e => e.key === 'Enter' && createFolderAndSave(savingCardId)}
+                                />
+                                <button onClick={() => createFolderAndSave(savingCardId)} className="px-4 py-2.5 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-lg font-bold text-sm hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors shadow-sm">
+                                    Create
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* General Manage Folders Modal (From Sidebar) */}
                 {showFolderModal && (
                     <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/50 dark:bg-black/80 backdrop-blur-sm" onClick={() => setShowFolderModal(false)}>
                         <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl w-full max-w-sm p-6 flex flex-col shadow-2xl transition-colors duration-300" onClick={e => e.stopPropagation()}>
@@ -759,27 +1301,17 @@
                             </div>
                             
                             <div className="max-h-60 overflow-y-auto mb-4 flex flex-col gap-2 p-1 custom-scrollbar">
-                                {folders.filter(f => f.id !== 'favorites').length === 0 ? (
+                                {folders.filter(f => f.id !== 'favorites').map(f => (
+                                    <div key={f.id} className="flex items-center gap-3 p-3 border border-zinc-200 dark:border-zinc-700 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 transition-colors">
+                                        <Folder size={18} className="text-zinc-500 dark:text-zinc-400" />
+                                        <span className="font-medium text-zinc-800 dark:text-zinc-200 flex-1">{f.name}</span>
+                                        <button onClick={() => deleteFolder(f.id)} className="p-1.5 text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-md transition-colors" title="Delete Folder">
+                                            <Trash2 size={16} />
+                                        </button>
+                                    </div>
+                                ))}
+                                {folders.filter(f => f.id !== 'favorites').length === 0 && (
                                     <p className="text-sm text-zinc-500 dark:text-zinc-400 text-center py-4">No custom folders yet. Create one below!</p>
-                                ) : (
-                                    <>
-                                        <p className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">Default Quick-Save Folders</p>
-                                        {folders.filter(f => f.id !== 'favorites').map(f => (
-                                            <label key={f.id} className="flex items-center gap-3 p-3 border border-zinc-200 dark:border-zinc-700 rounded-xl cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors">
-                                                <input 
-                                                    type="checkbox" 
-                                                    checked={targetFolders.includes(f.id)} 
-                                                    onChange={() => toggleTargetFolder(f.id)}
-                                                    className="w-5 h-5 rounded border-zinc-300 dark:border-zinc-600 text-zinc-900 focus:ring-zinc-900 dark:focus:ring-white accent-zinc-900 dark:accent-zinc-100 cursor-pointer"
-                                                />
-                                                <Folder size={18} className="text-zinc-500 dark:text-zinc-400" />
-                                                <span className="font-medium text-zinc-800 dark:text-zinc-200 flex-1">{f.name}</span>
-                                                <button onClick={(e) => { e.preventDefault(); deleteFolder(f.id); }} className="p-1.5 text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-md transition-colors" title="Delete Folder">
-                                                    <Trash2 size={16} />
-                                                </button>
-                                            </label>
-                                        ))}
-                                    </>
                                 )}
                             </div>
 
@@ -790,9 +1322,9 @@
                                     onChange={e => setNewFolderName(e.target.value)}
                                     placeholder="New folder name..."
                                     className="flex-1 p-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 rounded-lg text-sm text-zinc-900 dark:text-white focus:outline-none focus:border-zinc-500 transition-colors"
-                                    onKeyDown={e => e.key === 'Enter' && createFolder()}
+                                    onKeyDown={e => e.key === 'Enter' && createFolderAndSave(null)}
                                 />
-                                <button onClick={createFolder} className="px-4 py-2.5 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-lg font-bold text-sm hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors shadow-sm">
+                                <button onClick={() => createFolderAndSave(null)} className="px-4 py-2.5 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-lg font-bold text-sm hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors shadow-sm">
                                     Create
                                 </button>
                             </div>
@@ -800,11 +1332,13 @@
                     </div>
                 )}
 
-                {/* Editing Modal */}
+                {/* Editing/Creation Modal */}
                 {editingCard && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 dark:bg-black/80 backdrop-blur-sm" onClick={() => setEditingCard(null)}>
                         <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl w-full max-w-lg p-6 flex flex-col gap-4 shadow-2xl transition-colors duration-300" onClick={e => e.stopPropagation()}>
-                            <h2 className="text-xl font-bold text-zinc-900 dark:text-white mb-2">Edit Flashcard</h2>
+                            <h2 className="text-xl font-bold text-zinc-900 dark:text-white mb-2">
+                                {editingCard.isNew ? 'Create Flashcard' : 'Edit Flashcard'}
+                            </h2>
                             
                             <div>
                                 <label className="block text-sm font-bold text-zinc-600 dark:text-zinc-400 mb-1">Section (Bottom Right)</label>
@@ -819,6 +1353,7 @@
                             <div>
                                 <label className="block text-sm font-bold text-zinc-600 dark:text-zinc-400 mb-1">Question (Front)</label>
                                 <textarea 
+                                    autoFocus={editingCard.isNew}
                                     rows="3" 
                                     value={editingCard.q} 
                                     onChange={e => setEditingCard({...editingCard, q: e.target.value})} 
@@ -838,7 +1373,9 @@
 
                             <div className="flex justify-end gap-3 mt-4">
                                 <button onClick={() => setEditingCard(null)} className="px-4 py-2 rounded-lg font-bold text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">Cancel</button>
-                                <button onClick={saveEditedCard} className="px-4 py-2 rounded-lg font-bold bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200 transition-colors">Save Changes</button>
+                                <button onClick={saveEditedCard} className="px-4 py-2 rounded-lg font-bold bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200 transition-colors">
+                                    {editingCard.isNew ? 'Add Card' : 'Save Changes'}
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -864,20 +1401,20 @@
                     <div className="flex flex-col p-3 gap-3 border-b border-zinc-200 dark:border-zinc-800 transition-colors duration-300">
                         <div className="flex gap-2">
                             <button 
-                                onClick={() => { setFilter('all'); setSlideDirection('next'); setCurrentIndex(0); setIsFlipped(false); }}
+                                onClick={() => { setFilter('all'); setSlideDirection('none'); setCurrentIndex(0); setIsFlipped(false); }}
                                 className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-md transition-colors ${filter === 'all' ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white' : 'text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200'}`}
                             >
                                 Study All
                             </button>
                             <button 
-                                onClick={() => { setFilter('mastered'); setSlideDirection('next'); setCurrentIndex(0); setIsFlipped(false); }}
+                                onClick={() => { setFilter('mastered'); setSlideDirection('none'); setCurrentIndex(0); setIsFlipped(false); }}
                                 className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-md transition-colors ${filter === 'mastered' ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white' : 'text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200'}`}
                             >
                                 Known ({mastered.length})
                             </button>
                         </div>
                         <select
-                            value={filter.startsWith('folder_') ? filter : ''}
+                            value={filter !== 'all' && filter !== 'mastered' ? filter : ''}
                             onChange={(e) => {
                                 if (e.target.value) {
                                     setFilter(e.target.value);
@@ -886,11 +1423,11 @@
                                     setIsFlipped(false);
                                 }
                             }}
-                            className={`w-full py-2 px-3 text-sm font-bold rounded-lg outline-none transition-colors border ${filter.startsWith('folder_') ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white border-zinc-300 dark:border-zinc-600' : 'bg-transparent text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800/50'}`}
+                            className={`w-full py-2 px-3 text-sm font-bold rounded-lg outline-none transition-colors border ${filter !== 'all' && filter !== 'mastered' ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white border-zinc-300 dark:border-zinc-600' : 'bg-transparent text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800/50'}`}
                         >
                             <option value="" disabled>Select Folder...</option>
                             {folders.map(f => (
-                                <option key={f.id} value={`folder_${f.id}`}>
+                                <option key={f.id} value={f.id}>
                                     📁 {f.name} ({f.cards.filter(id => !mastered.includes(id)).length})
                                 </option>
                             ))}
@@ -912,14 +1449,14 @@
                         activeCards.map((card, idx) => (
                         <div
                             key={card.id}
-                            draggable={filter.startsWith('folder_')}
+                            draggable={filter !== 'mastered'}
                             onDragStart={() => { dragItem.current = idx; }}
                             onDragEnter={() => { dragOverItem.current = idx; }}
                             onDragEnd={handleSort}
                             onDragOver={(e) => e.preventDefault()}
                             className={`flex items-center w-full p-2 rounded-lg mb-1 transition-colors ${currentIndex === idx ? 'bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700' : 'hover:bg-zinc-50 dark:hover:bg-zinc-800/50 border border-transparent'}`}
                         >
-                            {filter.startsWith('folder_') && (
+                            {filter !== 'mastered' && (
                                 <div className="cursor-grab active:cursor-grabbing text-zinc-400 dark:text-zinc-600 hover:text-zinc-600 dark:hover:text-zinc-400 mr-2 flex-shrink-0 transition-colors" title="Drag to reorder">
                                     <GripVertical size={16} />
                                 </div>
@@ -943,29 +1480,81 @@
                 </div>
 
                 {/* Header */}
-                <header className="bg-white dark:bg-zinc-900 shadow-sm border-b border-zinc-200 dark:border-zinc-800 px-4 py-4 flex items-center justify-between sticky top-0 z-10 transition-colors duration-300">
-                    <div className="flex items-center gap-4">
-                    <button 
-                        onClick={() => setIsSidebarOpen(true)}
-                        className="p-2 -ml-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
-                        title="Open Menu"
-                    >
-                        <MenuIcon size={22} />
-                    </button>
-                    <div className="flex items-center gap-2">
-                        <span className="font-bold text-zinc-900 dark:text-white">Card {activeCards.length > 0 ? currentIndex + 1 : 0}</span>
-                        <span className="text-sm text-zinc-500 dark:text-zinc-500">of {activeCards.length}</span>
-                    </div>
+                <header className="bg-white dark:bg-zinc-900 shadow-sm border-b border-zinc-200 dark:border-zinc-800 px-2 sm:px-4 py-3 flex items-center justify-between sticky top-0 z-10 transition-colors duration-300 gap-2 sm:gap-4 w-full">
+                    {/* Left Container */}
+                    <div className="flex items-center shrink-0">
+                        <button 
+                            onClick={() => setIsSidebarOpen(true)}
+                            className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
+                            title="Open Menu"
+                        >
+                            <MenuIcon size={22} />
+                        </button>
+                        <div className="hidden md:flex items-center gap-2 ml-2 mr-4">
+                            <span className="font-bold text-zinc-900 dark:text-white whitespace-nowrap">Card {activeCards.length > 0 ? currentIndex + 1 : 0}</span>
+                            <span className="text-sm text-zinc-500 dark:text-zinc-500 whitespace-nowrap">of {activeCards.length}</span>
+                        </div>
                     </div>
                     
-                    <div className="flex items-center gap-2">
-                    <button 
-                        onClick={() => setView('setup')}
-                        className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
-                        title="Return to Dashboard"
-                    >
-                        <Home size={22} />
-                    </button>
+                    {/* Tab Bar Container (Drop Target) */}
+                    <div className="flex-1 overflow-x-auto flex items-center gap-2 hide-scrollbar">
+                        <button
+                            onClick={() => { setFilter('all'); setSlideDirection('none'); setCurrentIndex(0); setIsFlipped(false); }}
+                            className={`shrink-0 px-4 py-1.5 text-sm font-bold rounded-full transition-colors ${filter === 'all' ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 shadow-sm' : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700'}`}
+                        >
+                            All Cards
+                        </button>
+                        
+                        {folders.map(f => {
+                            const isActive = filter === f.id;
+                            const isFav = f.id === 'favorites';
+                            const isDragOver = dragOverFolderId === f.id;
+                            const count = f.cards.filter(id => !mastered.includes(id)).length;
+                            
+                            return (
+                                <button
+                                    key={f.id}
+                                    onClick={() => { setFilter(f.id); setSlideDirection('none'); setCurrentIndex(0); setIsFlipped(false); }}
+                                    onDragOver={(e) => { e.preventDefault(); setDragOverFolderId(f.id); }}
+                                    onDragLeave={() => setDragOverFolderId(null)}
+                                    onDrop={(e) => {
+                                        e.preventDefault();
+                                        const cardId = e.dataTransfer.getData("cardId");
+                                        if (cardId) addCardToFolder(f.id, cardId);
+                                        setDragOverFolderId(null);
+                                    }}
+                                    className={`shrink-0 px-4 py-1.5 text-sm font-bold rounded-full transition-all flex items-center gap-1.5 ${isActive ? (isFav ? 'bg-amber-500 text-white shadow-sm' : 'bg-blue-500 text-white shadow-sm') : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700'} ${isDragOver ? 'scale-110 ring-2 ring-indigo-500 ring-offset-2 dark:ring-offset-zinc-900' : ''}`}
+                                >
+                                    {isFav ? <Star size={14} fill={isActive ? "currentColor" : "none"}/> : <Folder size={14}/>}
+                                    {f.name} ({count})
+                                </button>
+                            );
+                        })}
+                        
+                        <button
+                            onClick={() => { setFilter('mastered'); setSlideDirection('none'); setCurrentIndex(0); setIsFlipped(false); }}
+                            className={`shrink-0 px-4 py-1.5 text-sm font-bold rounded-full transition-colors flex items-center gap-1.5 ${filter === 'mastered' ? 'bg-emerald-500 text-white shadow-sm' : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700'}`}
+                        >
+                            <CheckCircle size={14}/> Known ({mastered.length})
+                        </button>
+                    </div>
+
+                    {/* Right Container */}
+                    <div className="flex items-center shrink-0 gap-1 sm:gap-2 ml-2">
+                        <button 
+                            onClick={handleAddCard}
+                            className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
+                            title="Add Flashcard"
+                        >
+                            <Plus size={22} />
+                        </button>
+                        <button 
+                            onClick={() => setView('setup')}
+                            className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
+                            title="Return to Dashboard"
+                        >
+                            <Home size={22} />
+                        </button>
                     </div>
                 </header>
 
@@ -980,23 +1569,39 @@
                 {/* Main Flashcard Area */}
                 <main className="flex-1 flex flex-col items-center justify-center p-4 sm:p-8 relative overflow-hidden">
                     
-                    {activeCards.length === 0 ? (
-                    <div className="w-full flex flex-col items-center justify-center flex-1 text-zinc-500">
-                        {filter.startsWith('folder_') ? <Folder size={48} className="mb-4 opacity-20 text-zinc-500" /> : <CheckCircle size={48} className="mb-4 opacity-20 text-green-500" />}
-                        <p className="text-center px-4 font-medium text-zinc-600 dark:text-zinc-400 max-w-sm">
-                            {filter.startsWith('folder_') ? "This folder is empty. Click the 'Folder+' icon on a card to add it here." : 
-                             filter === 'mastered' ? "No mastered cards yet." : 
-                             "You've mastered all the cards! Great job!"}
-                        </p>
-                        {filter !== 'all' && (
+                    {allCards.length === 0 ? (
+                        <div className="w-full flex flex-col items-center justify-center flex-1 text-zinc-500">
+                            <div className="p-4 bg-zinc-100 dark:bg-zinc-800 rounded-full mb-4">
+                                <Plus size={48} className="text-zinc-400 dark:text-zinc-500" />
+                            </div>
+                            <h2 className="text-xl font-bold text-zinc-900 dark:text-white mb-2">This deck is empty</h2>
+                            <p className="text-center px-4 font-medium text-zinc-600 dark:text-zinc-400 max-w-sm mb-6">
+                                Create your first flashcard to start studying.
+                            </p>
                             <button 
-                            onClick={() => { setFilter('all'); setSlideDirection('none'); setCurrentIndex(0); }} 
-                            className="mt-6 px-5 py-2.5 bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-300 rounded-lg transition-colors font-bold text-sm shadow-sm"
+                                onClick={handleAddCard}
+                                className="px-6 py-3 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-lg font-bold shadow-md hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors flex items-center gap-2"
                             >
-                            Return to Study View
+                                <Plus size={20} /> Create Flashcard
                             </button>
-                        )}
-                    </div>
+                        </div>
+                    ) : activeCards.length === 0 ? (
+                        <div className="w-full flex flex-col items-center justify-center flex-1 text-zinc-500">
+                            {filter !== 'all' && filter !== 'mastered' ? <Folder size={48} className="mb-4 opacity-60 dark:opacity-40 text-zinc-400 dark:text-zinc-500" /> : <CheckCircle size={48} className="mb-4 opacity-60 dark:opacity-40 text-emerald-500 dark:text-emerald-400" />}
+                            <p className="text-center px-4 font-medium text-zinc-600 dark:text-zinc-400 max-w-sm">
+                                {filter !== 'all' && filter !== 'mastered' ? "This folder is empty. Click the 'Folder+' icon on a card to add it here." : 
+                                filter === 'mastered' ? "No mastered cards yet." : 
+                                "You've mastered all the cards! Great job!"}
+                            </p>
+                            {filter !== 'all' && (
+                                <button 
+                                onClick={() => { setFilter('all'); setSlideDirection('none'); setCurrentIndex(0); }} 
+                                className="mt-6 px-5 py-2.5 bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-300 rounded-lg transition-colors font-bold text-sm shadow-sm"
+                                >
+                                Return to Study View
+                                </button>
+                            )}
+                        </div>
                     ) : (
                     <div className="w-full flex justify-center items-center flex-1 relative">
                         {/* Desktop Prev Button */}
@@ -1008,10 +1613,16 @@
                         <ChevronLeft size={32} />
                         </button>
 
-                        {/* 3D Card Container */}
+                        {/* 3D Card Container (Draggable) */}
                         <div 
                         key={currentCard.id} // Utilizing card ID enforces pure clean remounts for flawless animation triggering
-                        className={`relative w-full max-w-lg aspect-[4/3] sm:aspect-[3/2] cursor-pointer group select-none ${slideClass}`}
+                        draggable="true"
+                        onDragStart={(e) => {
+                            e.dataTransfer.setData("cardId", activeIdForActions);
+                            // Setting effect for drop
+                            e.dataTransfer.effectAllowed = "copyMove";
+                        }}
+                        className={`relative w-full max-w-lg aspect-[4/3] sm:aspect-[3/2] cursor-pointer group select-none ${slideClass} active:cursor-grabbing`}
                         style={{ perspective: '1200px' }}
                         onClick={handleCardTap}
                         onTouchStart={onTouchStart}
@@ -1032,32 +1643,46 @@
                             className="absolute inset-0 w-full h-full bg-white dark:bg-zinc-900 rounded-2xl shadow-xl border border-zinc-200 dark:border-zinc-800 flex flex-col p-6 sm:p-8 text-center transition-colors duration-300"
                             style={{ backfaceVisibility: 'hidden' }}
                             >
+                            {/* Review Indicator */}
+                            {currentCard.isReview && (
+                                <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300 text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider flex items-center gap-1 z-10">
+                                    <RefreshCw size={10} /> Review
+                                </div>
+                            )}
+                            
                             {/* Header Buttons Area */}
                             <div className="absolute top-3 right-3 flex items-center gap-1 z-20">
                                 <button 
-                                    onClick={(e) => { e.stopPropagation(); setEditingCard({...currentCard}); }}
+                                    onClick={(e) => { e.stopPropagation(); setEditingCard({...currentCard, id: activeIdForActions}); }}
                                     className={`p-2 rounded-full transition-colors text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 dark:text-zinc-500 dark:hover:text-zinc-300 dark:hover:bg-zinc-800/50`}
                                     title="Edit Card"
                                 >
                                     <Edit2 size={20} />
                                 </button>
                                 <button 
-                                    onClick={(e) => { e.stopPropagation(); toggleCardInFolder('favorites', currentCard.id); }}
-                                    className={`p-2 rounded-full transition-colors ${isFav ? 'text-yellow-500 dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800/50' : 'text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 dark:text-zinc-500 dark:hover:text-zinc-300 dark:hover:bg-zinc-800/50'}`}
+                                    onClick={(e) => { e.stopPropagation(); toggleCardInFolder('favorites', activeIdForActions); }}
+                                    className={`p-2 rounded-full transition-colors ${isFav ? 'text-amber-500 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/20 hover:bg-amber-100 dark:hover:bg-amber-500/30' : 'text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 dark:text-zinc-500 dark:hover:text-zinc-300 dark:hover:bg-zinc-800/50'}`}
                                     title={isFav ? "Remove from Favorites" : "Add to Favorites"}
                                 >
                                     <Star size={22} fill={isFav ? "currentColor" : "none"} />
                                 </button>
                                 <button 
-                                    onClick={(e) => handleQuickSave(currentCard.id, e)}
-                                    className={`p-2 rounded-full transition-colors ${isInTarget ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50' : 'text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 dark:text-zinc-500 dark:hover:text-zinc-300 dark:hover:bg-zinc-800/50'}`}
-                                    title={targetFolders.length > 0 ? (isInTarget ? "Remove from Quick-Save Folders" : "Save to Default Folders") : "Set Default Quick-Save Folders"}
+                                    onClick={(e) => { e.stopPropagation(); setSavingCardId(activeIdForActions); }}
+                                    className={`p-2 rounded-full transition-colors ${inCustomFolder ? 'text-blue-500 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/20 hover:bg-blue-100 dark:hover:bg-blue-500/30' : 'text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 dark:text-zinc-500 dark:hover:text-zinc-300 dark:hover:bg-zinc-800/50'}`}
+                                    title="Save to Folders"
                                 >
                                     <FolderPlus size={22} />
                                 </button>
                                 <button 
-                                    onClick={(e) => toggleMastered(currentCard.id, e)}
-                                    className={`p-2 rounded-full transition-colors ${isMastered ? 'text-green-500 dark:text-green-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/50' : 'text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 dark:text-zinc-500 dark:hover:text-zinc-300 dark:hover:bg-zinc-800/50'}`}
+                                    onClick={handleTryAgain}
+                                    className={`p-2 rounded-full transition-colors text-zinc-400 hover:text-indigo-600 hover:bg-indigo-50 dark:text-zinc-500 dark:hover:text-indigo-400 dark:hover:bg-indigo-500/20`}
+                                    title="Try Again (Review in 5 cards)"
+                                >
+                                    <RefreshCw size={20} />
+                                </button>
+                                <button 
+                                    onClick={(e) => toggleMastered(activeIdForActions, e)}
+                                    className={`p-2 rounded-full transition-colors ${isMastered ? 'text-emerald-500 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/20 hover:bg-emerald-100 dark:hover:bg-emerald-500/30' : 'text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 dark:text-zinc-500 dark:hover:text-zinc-300 dark:hover:bg-zinc-800/50'}`}
                                     title={isMastered ? "Unmark Mastered" : "Mark as Mastered (Eliminate)"}
                                 >
                                     <CheckCircle size={22} />
@@ -1072,7 +1697,7 @@
                             <div className="absolute bottom-5 left-5 text-xs font-mono text-zinc-500 dark:text-zinc-500">{docLabel}</div>
                             <div className="absolute bottom-5 right-5 text-xs font-mono text-zinc-500 dark:text-zinc-500">{currentCard.sec}</div>
                             
-                            <div className="flex-1 overflow-y-auto mt-10 mb-10 px-2 flex flex-col custom-scrollbar">
+                            <div className="flex-1 overflow-y-auto mt-10 mb-10 px-2 flex flex-col custom-scrollbar pointer-events-none">
                                 <h2 className="m-auto text-xl sm:text-2xl md:text-3xl font-bold text-zinc-900 dark:text-white leading-snug">
                                 {currentCard.q}
                                 </h2>
@@ -1080,7 +1705,7 @@
                             
                             {/* Tap hint */}
                             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-zinc-400 dark:text-zinc-500 opacity-0 group-hover:opacity-100 transition-opacity hidden sm:flex items-center gap-1 text-sm">
-                                <RotateCcw size={14} /> Tap to flip
+                                <RotateCcw size={14} /> Tap to flip or Drag to folder
                             </div>
                             </div>
 
@@ -1089,32 +1714,46 @@
                             className="absolute inset-0 w-full h-full bg-zinc-50 dark:bg-zinc-800 rounded-2xl shadow-xl border border-zinc-200 dark:border-zinc-700 flex flex-col p-6 sm:p-8 text-center transition-colors duration-300"
                             style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
                             >
+                            {/* Review Indicator */}
+                            {currentCard.isReview && (
+                                <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300 text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider flex items-center gap-1 z-10">
+                                    <RefreshCw size={10} /> Review
+                                </div>
+                            )}
+                            
                             {/* Header Buttons Area */}
                             <div className="absolute top-3 right-3 flex items-center gap-1 z-20">
                                 <button 
-                                    onClick={(e) => { e.stopPropagation(); setEditingCard({...currentCard}); }}
+                                    onClick={(e) => { e.stopPropagation(); setEditingCard({...currentCard, id: activeIdForActions}); }}
                                     className={`p-2 rounded-full transition-colors text-zinc-400 hover:text-zinc-900 hover:bg-zinc-200 dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-700`}
                                     title="Edit Card"
                                 >
                                     <Edit2 size={20} />
                                 </button>
                                 <button 
-                                    onClick={(e) => { e.stopPropagation(); toggleCardInFolder('favorites', currentCard.id); }}
-                                    className={`p-2 rounded-full transition-colors ${isFav ? 'text-yellow-500 dark:text-white hover:bg-zinc-200 dark:hover:bg-zinc-700' : 'text-zinc-400 hover:text-zinc-900 hover:bg-zinc-200 dark:text-zinc-500 dark:hover:text-zinc-300 dark:hover:bg-zinc-700'}`}
+                                    onClick={(e) => { e.stopPropagation(); toggleCardInFolder('favorites', activeIdForActions); }}
+                                    className={`p-2 rounded-full transition-colors ${isFav ? 'text-amber-500 dark:text-amber-400 bg-amber-100 dark:bg-amber-500/20 hover:bg-amber-100 dark:hover:bg-amber-500/30' : 'text-zinc-400 hover:text-zinc-900 hover:bg-zinc-200 dark:text-zinc-500 dark:hover:text-zinc-300 dark:hover:bg-zinc-700'}`}
                                     title={isFav ? "Remove from Favorites" : "Add to Favorites"}
                                 >
                                     <Star size={22} fill={isFav ? "currentColor" : "none"} />
                                 </button>
                                 <button 
-                                    onClick={(e) => handleQuickSave(currentCard.id, e)}
-                                    className={`p-2 rounded-full transition-colors ${isInTarget ? 'text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/40 hover:bg-blue-200 dark:hover:bg-blue-800/60' : 'text-zinc-400 hover:text-zinc-900 hover:bg-zinc-200 dark:text-zinc-500 dark:hover:text-zinc-300 dark:hover:bg-zinc-700'}`}
-                                    title={targetFolders.length > 0 ? (isInTarget ? "Remove from Quick-Save Folders" : "Save to Default Folders") : "Set Default Quick-Save Folders"}
+                                    onClick={(e) => { e.stopPropagation(); setSavingCardId(activeIdForActions); }}
+                                    className={`p-2 rounded-full transition-colors ${inCustomFolder ? 'text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-500/20 hover:bg-blue-200 dark:hover:bg-blue-500/30' : 'text-zinc-400 hover:text-zinc-900 hover:bg-zinc-200 dark:text-zinc-500 dark:hover:text-zinc-300 dark:hover:bg-zinc-700'}`}
+                                    title="Save to Folders"
                                 >
                                     <FolderPlus size={22} />
                                 </button>
                                 <button 
-                                    onClick={(e) => toggleMastered(currentCard.id, e)}
-                                    className={`p-2 rounded-full transition-colors ${isMastered ? 'text-green-600 dark:text-green-400 hover:bg-zinc-200 dark:hover:bg-zinc-700' : 'text-zinc-400 hover:text-zinc-900 hover:bg-zinc-200 dark:text-zinc-500 dark:hover:text-zinc-300 dark:hover:bg-zinc-700'}`}
+                                    onClick={handleTryAgain}
+                                    className={`p-2 rounded-full transition-colors text-zinc-400 hover:text-indigo-600 hover:bg-indigo-100 dark:text-zinc-500 dark:hover:text-indigo-400 dark:hover:bg-indigo-500/30`}
+                                    title="Try Again (Review in 5 cards)"
+                                >
+                                    <RefreshCw size={20} />
+                                </button>
+                                <button 
+                                    onClick={(e) => toggleMastered(activeIdForActions, e)}
+                                    className={`p-2 rounded-full transition-colors ${isMastered ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-500/20 hover:bg-emerald-200 dark:hover:bg-emerald-500/30' : 'text-zinc-400 hover:text-zinc-900 hover:bg-zinc-200 dark:text-zinc-500 dark:hover:text-zinc-300 dark:hover:bg-zinc-700'}`}
                                     title={isMastered ? "Unmark Mastered" : "Mark as Mastered (Eliminate)"}
                                 >
                                     <CheckCircle size={22} />
@@ -1129,7 +1768,7 @@
                             <div className="absolute bottom-5 left-5 text-xs font-mono text-zinc-500 dark:text-zinc-400">{docLabel}</div>
                             <div className="absolute bottom-5 right-5 text-xs font-mono text-zinc-500 dark:text-zinc-400">{currentCard.sec}</div>
                             
-                            <div className="flex-1 overflow-y-auto mt-10 mb-10 px-2 flex flex-col custom-scrollbar">
+                            <div className="flex-1 overflow-y-auto mt-10 mb-10 px-2 flex flex-col custom-scrollbar pointer-events-none">
                                 <p className="m-auto text-lg sm:text-xl md:text-2xl text-zinc-800 dark:text-zinc-100 font-bold leading-relaxed">
                                 {currentCard.a}
                                 </p>
