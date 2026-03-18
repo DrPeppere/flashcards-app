@@ -104,7 +104,7 @@
         );
 
         const ChevronLeft = ({size}) => <Icon size={size}><polyline points="15 18 9 12 15 6"></polyline></Icon>;
-        const ChevronRight = ({size}) => <Icon size={size}><polyline points="9 18 15 12 9 6"></polyline></Icon>;
+        const ChevronRight = ({size, className}) => <Icon size={size} className={className}><polyline points="9 18 15 12 9 6"></polyline></Icon>;
         const RotateCcw = ({size}) => <Icon size={size}><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></Icon>;
         const Settings = ({size}) => <Icon size={size}><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></Icon>;
         const AlertCircle = ({size, className}) => <Icon size={size} className={className}><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></Icon>;
@@ -130,6 +130,7 @@
         const RefreshCw = ({size, className}) => <Icon size={size} className={className}><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></Icon>;
         const Download = ({size, className}) => <Icon size={size} className={className}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></Icon>;
         const Layers = ({size, className}) => <Icon size={size} className={className}><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></Icon>;
+        const Copy = ({size, className}) => <Icon size={size} className={className}><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></Icon>;
 
         // --- Main App Component ---
         function App() {
@@ -139,6 +140,14 @@
             const [theme, setTheme] = useState(() => {
                 return localStorage.getItem('flashcard_theme') || 'dark';
             });
+            // Keybinds
+            const [keybinds, setKeybinds] = useState(() => {
+                const saved = localStorage.getItem('flashcard_keybinds');
+                return saved ? JSON.parse(saved) : { next: 'ArrowRight', prev: 'ArrowLeft', flip: ' ', up: 'ArrowUp', down: 'ArrowDown' };
+            });
+            const [listeningAction, setListeningAction] = useState(null);
+            const [copied, setCopied] = useState(false);
+
             const [showSettingsModal, setShowSettingsModal] = useState(false);
             const [showCreateDeckModal, setShowCreateDeckModal] = useState(false);
             const [newDeckDetails, setNewDeckDetails] = useState({ name: '', subj: '', doc: '' });
@@ -156,6 +165,7 @@
 
             // Library State (GitHub Database)
             const [libraryDecks, setLibraryDecks] = useState([]);
+            const [expandedLibraryFolder, setExpandedLibraryFolder] = useState(null);
             const [isLibraryLoading, setIsLibraryLoading] = useState(false);
             const [libraryError, setLibraryError] = useState('');
             const [isInstalling, setIsInstalling] = useState(null);
@@ -204,6 +214,23 @@
                 }
                 localStorage.setItem('flashcard_theme', theme);
             }, [theme]);
+
+            // Sync keybinds to localStorage
+            useEffect(() => {
+                localStorage.setItem('flashcard_keybinds', JSON.stringify(keybinds));
+            }, [keybinds]);
+
+            // Global Keybind Listener for rebinding
+            useEffect(() => {
+                if (!listeningAction) return;
+                const handleListen = (e) => {
+                    e.preventDefault();
+                    setKeybinds(prev => ({ ...prev, [listeningAction]: e.key }));
+                    setListeningAction(null);
+                };
+                window.addEventListener('keydown', handleListen);
+                return () => window.removeEventListener('keydown', handleListen);
+            }, [listeningAction]);
 
             // Fetch Library from GitHub on mount
             useEffect(() => {
@@ -290,20 +317,20 @@
             useEffect(() => {
                 const handleKeyDown = (e) => {
                     // Disable keyboard nav if we aren't studying or if we are actively typing in an edit/folder modal
-                    if (view !== 'study' || editingCard || showSettingsModal || showFolderModal || savingCardId || showCreateDeckModal || showCombineModal || editingDeckId) return; 
+                    if (view !== 'study' || editingCard || showSettingsModal || showFolderModal || savingCardId || showCreateDeckModal || showCombineModal || editingDeckId || listeningAction) return; 
                     
-                    if (e.key === 'ArrowRight') {
+                    if (e.key === keybinds.next) {
                         handleNext();
-                    } else if (e.key === 'ArrowLeft') {
+                    } else if (e.key === keybinds.prev) {
                         handlePrev();
-                    } else if (e.key === ' ') {
+                    } else if (e.key === keybinds.flip) {
                         e.preventDefault();
                         setIsFlipped((prev) => !prev);
-                    } else if (e.key === 'ArrowUp') {
+                    } else if (e.key === keybinds.up) {
                         e.preventDefault();
                         const ref = isFlippedRef.current ? backScrollRef.current : frontScrollRef.current;
                         if (ref) ref.scrollBy({ top: -100, behavior: 'smooth' });
-                    } else if (e.key === 'ArrowDown') {
+                    } else if (e.key === keybinds.down) {
                         e.preventDefault();
                         const ref = isFlippedRef.current ? backScrollRef.current : frontScrollRef.current;
                         if (ref) ref.scrollBy({ top: 100, behavior: 'smooth' });
@@ -312,7 +339,7 @@
 
                 window.addEventListener('keydown', handleKeyDown);
                 return () => window.removeEventListener('keydown', handleKeyDown);
-            }, [view, currentIndex, activeCards.length, editingCard, showSettingsModal, showFolderModal, savingCardId, showCreateDeckModal, showCombineModal, editingDeckId]);
+            }, [view, currentIndex, activeCards.length, editingCard, showSettingsModal, showFolderModal, savingCardId, showCreateDeckModal, showCombineModal, editingDeckId, keybinds, listeningAction]);
 
             // File Upload Handlers
             const handleDragOver = (e) => {
@@ -342,6 +369,7 @@
                 if (GITHUB_USER === "YOUR_USERNAME") return; 
                 setIsLibraryLoading(true);
                 setLibraryError('');
+                setExpandedLibraryFolder(null); // Reset folder view on refresh
                 try {
                     // We bypass relative paths completely to prevent Blob/Local fetch errors
                     const response = await fetch(GITHUB_BASE + 'catalog.json');
@@ -427,7 +455,7 @@
                 });
             };
 
-            // Export logic converting back to HTML string
+            // Export logic converting to raw JSON
             const handleExportDeck = (deck, e) => {
                 e.stopPropagation();
                 
@@ -439,53 +467,14 @@
                     q: c.q || '',
                     a: c.a || ''
                 }));
-                // Add the expected END marker
-                cardsJSON.push({ id: "END", subj: "END", doc: "END", sec: "END", q: "END", a: "END" });
 
-                const htmlContent = `<!DOCTYPE html><html><head><title>${deck.name}</title><style>
-    body { font-family: sans-serif; margin: 20px; background-color: #f4f4f9; color: #333; }
-    h1 { text-align: center; }
-    table { width: 100%; border-collapse: collapse; margin-top: 20px; background-color: #fff; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-    th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
-    th { background-color: #0056b3; color: white; position: sticky; top: 0; }
-    tr:nth-child(even) { background-color: #f9f9f9; }
-    .meta-col { width: 8%; font-family: monospace; font-size: 0.9em; text-align: center; }
-    .content-col { width: 34%; }
-</style></head><body><h1>${deck.name}</h1><table id="flashcardTable">
-    <thead>
-        <tr>
-            <th class="meta-col">ID (Top-L)</th>
-            <th class="meta-col">Subject (Top-R)</th>
-            <th class="meta-col">Doc (Bot-L)</th>
-            <th class="meta-col">Section (Bot-R)</th>
-            <th class="content-col">Question (Front)</th>
-            <th class="content-col">Answer (Back)</th>
-        </tr>
-    </thead>
-    <tbody>
-    </tbody></table><script>
-const cardsData = ${JSON.stringify(cardsJSON, null, 4)};
+                const jsonContent = JSON.stringify(cardsJSON, null, 4);
 
-const tbody = document.querySelector('#flashcardTable tbody');
-cardsData.forEach(card => {
-    const row = document.createElement('tr');
-    row.innerHTML = \`
-        <td class="meta-col"><strong>\${card.id}</strong></td>
-        <td class="meta-col">\${card.subj}</td>
-        <td class="meta-col">\${card.doc}</td>
-        <td class="meta-col">\${card.sec}</td>
-        <td class="content-col">\${card.q}</td>
-        <td class="content-col">\${card.a}</td>
-    \`;
-    tbody.appendChild(row);
-});
-<\/script></body></html>`;
-
-                const blob = new Blob([htmlContent], { type: 'text/html' });
+                const blob = new Blob([jsonContent], { type: 'application/json' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `${deck.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.html`;
+                a.download = `${deck.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.json`;
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
@@ -607,8 +596,8 @@ cardsData.forEach(card => {
             const processFile = (file) => {
                 setError('');
                 
-                if (!file.name.toLowerCase().endsWith('.html')) {
-                    setError('Please upload a valid .html file.');
+                if (!file.name.toLowerCase().endsWith('.json')) {
+                    setError('Please upload a valid .json file.');
                     return;
                 }
 
@@ -616,45 +605,40 @@ cardsData.forEach(card => {
                 reader.onload = (e) => {
                 const content = e.target.result;
                 try {
-                    // 1. Find the start of the array
-                    const arrayStartIndicator = 'const cardsData = [';
-                    const startIdx = content.indexOf(arrayStartIndicator);
-                    if (startIdx === -1) throw new Error("Could not find 'cardsData' array in the file.");
+                    const parsedCardsRaw = JSON.parse(content);
                     
-                    // 2. Find the end of the array 
-                    const endIdx = content.indexOf('];', startIdx);
-                    if (endIdx === -1) throw new Error("Could not find the end of the 'cardsData' array.");
-
-                    // Extract just the array string e.g. "[{...}, {...}]"
-                    let arrayString = content.substring(startIdx + arrayStartIndicator.length - 1, endIdx + 1).trim();
-
-                    // 3. Parse the array into Javascript objects
-                    const parsedCardsRaw = new Function('return ' + arrayString)();
+                    // Add fallback to check if it's a full deck object instead of just an array
+                    const cardsArray = Array.isArray(parsedCardsRaw) ? parsedCardsRaw : (parsedCardsRaw.cards || []);
                     
-                    if (!Array.isArray(parsedCardsRaw) || parsedCardsRaw.length === 0) {
-                        throw new Error("The extracted data is not a valid array of flashcards.");
+                    if (!Array.isArray(cardsArray) || cardsArray.length === 0) {
+                        throw new Error("The JSON does not contain a valid array of flashcards.");
                     }
 
-                    // 4. Filter out the "END" dummy card
-                    const validCards = parsedCardsRaw.filter(c => c.id !== "END" && c.q !== "END");
+                    // Filter out any legacy "END" dummy cards just in case
+                    const validCards = cardsArray.filter(c => c.id !== "END" && c.q !== "END");
                     
                     if (validCards.length === 0) {
                          throw new Error("No valid flashcards found in the file.");
                     }
 
-                    // 5. Overwrite the integer id with a unique string for the app's internal logic
+                    // Overwrite the integer id with a unique string for the app's internal logic
                     const parsedCardsWithIds = validCards.map((c, i) => ({ 
                         ...c, 
                         id: `card_${Date.now()}_${i}` 
                     }));
 
-                    // 6. Extract the labels from the very first valid card
+                    // Extract the labels from the very first valid card
                     const newSubjectLabel = validCards[0].subj || 'SUBJ';
                     const newDocLabel = validCards[0].doc || 'DOC';
+                    
+                    // Use a name from the JSON if it was exported as an object, otherwise default to file name
+                    const deckName = (parsedCardsRaw.name && !Array.isArray(parsedCardsRaw)) ? 
+                                     parsedCardsRaw.name : 
+                                     (newDocLabel !== 'DOC' ? newDocLabel : file.name.replace('.json', ''));
 
                     const newDeck = {
                         id: 'deck_' + Date.now(),
-                        name: newDocLabel !== 'DOC' ? newDocLabel : file.name.replace('.html', ''),
+                        name: deckName,
                         subjectLabel: newSubjectLabel,
                         docLabel: newDocLabel,
                         cards: parsedCardsWithIds,
@@ -673,7 +657,7 @@ cardsData.forEach(card => {
                     // Stays on dashboard
 
                 } catch (err) {
-                    setError(err.message || 'Failed to parse the file. Ensure it is formatted correctly.');
+                    setError(err.message || 'Failed to parse the JSON file. Ensure it is formatted correctly.');
                     console.error(err);
                 }
                 };
@@ -957,7 +941,7 @@ cardsData.forEach(card => {
                     {/* Combine Decks Modal */}
                     {showCombineModal && (
                         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 dark:bg-black/80 backdrop-blur-sm" onClick={() => setShowCombineModal(false)}>
-                            <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl w-full max-w-md p-6 flex flex-col gap-4 shadow-2xl transition-colors duration-300" onClick={e => e.stopPropagation()}>
+                            <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl w-full max-w-md p-6 flex flex-col gap-4 shadow-2xl transition-colors duration-300 max-h-[90vh] overflow-y-auto custom-scrollbar" onClick={e => e.stopPropagation()}>
                                 <div className="flex justify-between items-center mb-2">
                                     <h2 className="text-xl font-bold text-zinc-900 dark:text-white">Merge Decks</h2>
                                     <button onClick={() => setShowCombineModal(false)} className="text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-white transition-colors">
@@ -1098,11 +1082,11 @@ cardsData.forEach(card => {
 
                     {/* Settings Modal */}
                     {showSettingsModal && (
-                        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 dark:bg-black/80 backdrop-blur-sm" onClick={() => setShowSettingsModal(false)}>
-                            <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl w-full max-w-lg p-6 flex flex-col gap-6 shadow-2xl transition-colors duration-300" onClick={e => e.stopPropagation()}>
+                        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 dark:bg-black/80 backdrop-blur-sm" onClick={() => { setShowSettingsModal(false); setListeningAction(null); }}>
+                            <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl w-full max-w-lg p-6 flex flex-col gap-6 shadow-2xl transition-colors duration-300 max-h-[90vh] overflow-y-auto custom-scrollbar" onClick={e => e.stopPropagation()}>
                                 <div className="flex justify-between items-center">
                                     <h2 className="text-xl font-bold text-zinc-900 dark:text-white">App Settings</h2>
-                                    <button onClick={() => setShowSettingsModal(false)} className="text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-white transition-colors">
+                                    <button onClick={() => { setShowSettingsModal(false); setListeningAction(null); }} className="text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-white transition-colors">
                                         <X size={24} />
                                     </button>
                                 </div>
@@ -1120,10 +1104,75 @@ cardsData.forEach(card => {
                                     </button>
                                 </div>
                                 
-                                <div className="text-center mt-2">
-                                    <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">v2.5 Full Edition</p>
-                                    <p className="text-[9px] text-zinc-400 mt-1 truncate italic">DB: github.com/{GITHUB_USER}/{GITHUB_REPO}</p>
+                                <hr className="border-zinc-200 dark:border-zinc-800" />
+
+                                {/* Keybinds Section */}
+                                <div>
+                                    <h3 className="font-bold text-zinc-900 dark:text-white mb-3">Keybinds</h3>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                        {[
+                                            { id: 'next', label: 'Next Card' },
+                                            { id: 'prev', label: 'Previous Card' },
+                                            { id: 'flip', label: 'Flip Card' },
+                                            { id: 'up', label: 'Scroll Up' },
+                                            { id: 'down', label: 'Scroll Down' }
+                                        ].map(({ id, label }) => (
+                                            <div key={id} className="flex items-center justify-between p-3 bg-zinc-50 dark:bg-zinc-800/50 rounded-xl border border-zinc-200 dark:border-zinc-700 transition-colors">
+                                                <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">{label}</span>
+                                                <button 
+                                                    onClick={() => setListeningAction(listeningAction === id ? null : id)}
+                                                    className={`min-w-[4rem] px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${listeningAction === id ? 'bg-blue-500 border-blue-600 text-white animate-pulse' : 'bg-white dark:bg-zinc-900 border-zinc-300 dark:border-zinc-600 text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                                                >
+                                                    {listeningAction === id ? 'Press key...' : (keybinds[id] === ' ' ? 'Space' : keybinds[id].length === 1 ? keybinds[id].toUpperCase() : keybinds[id])}
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <p className="text-xs text-zinc-500 mt-2">Click a button and press any key to rebind.</p>
                                 </div>
+
+                                <hr className="border-zinc-200 dark:border-zinc-800" />
+
+                                {/* AI Template Section */}
+                                <div>
+                                    <h3 className="font-bold text-zinc-900 dark:text-white mb-3">Create with AI</h3>
+                                    <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-3">Copy this .JSON template to use with ChatGPT/Claude/Gemini -> Use AI to create and populate template -> paste outputted text into notepad then save as a .json file -> This new file can be inputted into the flashcard app.</p>
+                                    <div className="relative">
+                                        <pre className="p-4 bg-zinc-100 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-mono text-zinc-800 dark:text-zinc-300 overflow-x-auto custom-scrollbar">
+{`{
+  "name": "My AI Generated Deck",
+  "cards": [
+    {
+      "subj": "SUBJECT",
+      "doc": "CHAPTER",
+      "sec": "1.1",
+      "q": "Front of card",
+      "a": "Back of card"
+    }
+  ]
+}`}
+                                        </pre>
+                                        <button 
+                                            onClick={() => {
+                                                const template = `{\n  "name": "My AI Generated Deck",\n  "cards": [\n    {\n      "subj": "SUBJECT",\n      "doc": "CHAPTER",\n      "sec": "1.1",\n      "q": "Front of card",\n      "a": "Back of card"\n    }\n  ]\n}`;
+                                                const textArea = document.createElement("textarea");
+                                                textArea.value = template;
+                                                document.body.appendChild(textArea);
+                                                textArea.select();
+                                                document.execCommand("copy");
+                                                document.body.removeChild(textArea);
+                                                setCopied(true);
+                                                setTimeout(() => setCopied(false), 2000);
+                                            }}
+                                            className="absolute top-2 right-2 p-2 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white shadow-sm transition-colors"
+                                            title="Copy Template"
+                                        >
+                                            {copied ? <CheckCircle size={16} className="text-emerald-500"/> : <Copy size={16}/>}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <hr className="border-zinc-200 dark:border-zinc-800" />
 
                                 <div>
                                     <h3 className="font-bold text-zinc-900 dark:text-white mb-3">Installation Guide</h3>
@@ -1148,6 +1197,11 @@ cardsData.forEach(card => {
                                             </div>
                                         </div>
                                     </div>
+                                </div>
+
+                                <div className="text-center pt-2">
+                                    <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">v2.5 Full Edition</p>
+                                    <p className="text-[9px] text-zinc-400 mt-1 truncate italic">DB: github.com/{GITHUB_USER}/{GITHUB_REPO}</p>
                                 </div>
 
                             </div>
@@ -1232,7 +1286,7 @@ cardsData.forEach(card => {
                                                 <button 
                                                     onClick={(e) => handleExportDeck(deck, e)}
                                                     className="p-2 text-zinc-400 dark:text-zinc-600 hover:text-emerald-500 dark:hover:text-emerald-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors"
-                                                    title="Save/Export to HTML"
+                                                    title="Save/Export to JSON"
                                                 >
                                                     <Download size={18} />
                                                 </button>
@@ -1280,15 +1334,15 @@ cardsData.forEach(card => {
                         <div className="bg-white dark:bg-zinc-800 p-4 rounded-full shadow-sm mb-4 transition-colors duration-300">
                             <Upload size={32} className={`${isDragging ? 'text-blue-500 dark:text-zinc-300' : 'text-zinc-400 dark:text-zinc-500'}`} />
                         </div>
-                        <p className="text-zinc-500 dark:text-zinc-500 text-sm mb-6 text-center">Drag and drop your HTML file, or choose an option below</p>
+                        <p className="text-zinc-500 dark:text-zinc-500 text-sm mb-6 text-center">Drag and drop your JSON file, or choose an option below</p>
                         
                         <div className="flex flex-col sm:flex-row flex-wrap gap-3 w-full max-w-sm mx-auto justify-center">
                             <label className="flex-1 min-w-[140px] bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 hover:border-zinc-500 dark:hover:border-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-300 text-zinc-700 dark:text-zinc-300 font-semibold py-2.5 px-4 rounded-lg cursor-pointer transition-colors shadow-sm flex items-center justify-center gap-2">
                                 <FileCode size={18} />
-                                Import HTML
+                                Import JSON
                                 <input 
                                     type="file" 
-                                    accept=".html" 
+                                    accept=".json" 
                                     className="hidden" 
                                     onChange={handleFileInput} 
                                 />
@@ -1347,26 +1401,67 @@ cardsData.forEach(card => {
                                 <div className="h-16 bg-zinc-100 dark:bg-zinc-800 rounded-xl animate-pulse"></div>
                             </div>
                         ) : libraryDecks.length > 0 ? (
-                            <div className="grid gap-3">
-                                {libraryDecks.map(deck => (
-                                    <div key={deck.file} className="p-4 border border-zinc-200 dark:border-zinc-800 rounded-xl flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-950/30 group hover:border-zinc-400 transition-colors">
-                                        <div>
-                                            <h4 className="font-bold text-sm text-zinc-800 dark:text-zinc-200">{deck.name}</h4>
-                                            <div className="flex gap-3 text-[10px] text-zinc-500 uppercase font-bold mt-0.5">
-                                                <span>{deck.subject}</span>
-                                                <span>{deck.doc}</span>
-                                            </div>
-                                        </div>
-                                        <button 
-                                            onClick={() => installLibraryDeck(deck)} 
-                                            disabled={isInstalling === deck.file}
-                                            className="px-4 py-2 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 text-xs font-bold rounded-lg shadow-sm hover:scale-105 transition-transform disabled:opacity-50"
-                                        >
-                                            {isInstalling === deck.file ? 'Installing...' : 'Install'}
+                            expandedLibraryFolder ? (
+                                <div className="flex flex-col gap-3">
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <button onClick={() => setExpandedLibraryFolder(null)} className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded text-zinc-500 transition-colors">
+                                            <ChevronLeft size={20}/>
                                         </button>
+                                        <h3 className="font-bold text-zinc-800 dark:text-zinc-200 flex items-center gap-2">
+                                            <Folder size={18} className="text-blue-500" /> 
+                                            {expandedLibraryFolder}
+                                        </h3>
                                     </div>
-                                ))}
-                            </div>
+                                    <div className="grid gap-3">
+                                        {libraryDecks.filter(d => (d.folder || 'Main Collection') === expandedLibraryFolder).map(deck => (
+                                            <div key={deck.file} className="p-4 border border-zinc-200 dark:border-zinc-800 rounded-xl flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-950/30 group hover:border-zinc-400 transition-colors">
+                                                <div>
+                                                    <h4 className="font-bold text-sm text-zinc-800 dark:text-zinc-200">{deck.name}</h4>
+                                                    <div className="flex gap-3 text-[10px] text-zinc-500 uppercase font-bold mt-0.5">
+                                                        <span>{deck.subject}</span>
+                                                        <span>{deck.doc}</span>
+                                                    </div>
+                                                </div>
+                                                <button 
+                                                    onClick={() => installLibraryDeck(deck)} 
+                                                    disabled={isInstalling === deck.file}
+                                                    className="px-4 py-2 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 text-xs font-bold rounded-lg shadow-sm hover:scale-105 transition-transform disabled:opacity-50"
+                                                >
+                                                    {isInstalling === deck.file ? 'Installing...' : 'Install'}
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="grid gap-3">
+                                    {Object.entries(
+                                        libraryDecks.reduce((acc, deck) => {
+                                            const folder = deck.folder || 'Main Collection';
+                                            if (!acc[folder]) acc[folder] = [];
+                                            acc[folder].push(deck);
+                                            return acc;
+                                        }, {})
+                                    ).map(([folderName, decks]) => (
+                                        <div 
+                                            key={folderName} 
+                                            onClick={() => setExpandedLibraryFolder(folderName)}
+                                            className="p-4 border border-zinc-200 dark:border-zinc-800 rounded-xl flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-950/30 group hover:border-zinc-400 cursor-pointer transition-colors"
+                                        >
+                                            <div className="flex items-center gap-3">
+                                                <div className="p-2 bg-blue-100 dark:bg-blue-900/30 text-blue-500 dark:text-blue-400 rounded-lg">
+                                                    <Folder size={20} />
+                                                </div>
+                                                <div>
+                                                    <h4 className="font-bold text-sm text-zinc-800 dark:text-zinc-200">{folderName}</h4>
+                                                    <div className="text-xs text-zinc-500 mt-0.5">{decks.length} deck{decks.length !== 1 && 's'}</div>
+                                                </div>
+                                            </div>
+                                            <ChevronRight size={18} className="text-zinc-400 group-hover:text-zinc-600 dark:group-hover:text-zinc-300" />
+                                        </div>
+                                    ))}
+                                </div>
+                            )
                         ) : (
                             <div className="text-center py-4 text-zinc-500 text-sm italic">
                                 {GITHUB_USER === "YOUR_USERNAME" ? "Set your GitHub username in the code to see library decks." : "No decks found in the library catalog."}
@@ -1657,14 +1752,14 @@ cardsData.forEach(card => {
                     <div className="flex items-center shrink-0 gap-1 sm:gap-2 ml-2">
                         <button 
                             onClick={handleAddCard}
-                            className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
+                            className="p-2 hover:bg-zinc-100 dark:bg-zinc-800 rounded-full transition-colors text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
                             title="Add Flashcard"
                         >
                             <Plus size={22} />
                         </button>
                         <button 
                             onClick={() => setView('setup')}
-                            className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
+                            className="p-2 hover:bg-zinc-100 dark:bg-zinc-800 rounded-full transition-colors text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
                             title="Return to Dashboard"
                         >
                             <Home size={22} />
@@ -1743,6 +1838,13 @@ cardsData.forEach(card => {
                         onTouchMove={onTouchMove}
                         onTouchEnd={onTouchEnd}
                         >
+                        {/* Review Indicator (Moved above the card to prevent overlap) */}
+                        {currentCard.isReview && (
+                            <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-indigo-100 text-indigo-700 dark:bg-indigo-900/80 dark:text-indigo-300 text-[11px] font-bold px-3 py-1.5 rounded-full uppercase tracking-wider flex items-center gap-1.5 z-20 shadow-sm border border-indigo-200 dark:border-indigo-700 pointer-events-none">
+                                <RefreshCw size={12} /> Review
+                            </div>
+                        )}
+
                         {/* Card Inner (Handles 3D Transform) */}
                         <div 
                             className="w-full h-full relative"
@@ -1759,12 +1861,6 @@ cardsData.forEach(card => {
                             className="absolute inset-0 w-full h-full bg-white dark:bg-zinc-900 rounded-2xl shadow-xl border border-zinc-200 dark:border-zinc-800 flex flex-col p-6 sm:p-8 text-center transition-colors duration-300"
                             style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', transform: 'rotateY(0deg)', WebkitTransform: 'rotateY(0deg)' }} // Safari Fix
                             >
-                            {/* Review Indicator */}
-                            {currentCard.isReview && (
-                                <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300 text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider flex items-center gap-1 z-10">
-                                    <RefreshCw size={10} /> Review
-                                </div>
-                            )}
                             
                             {/* Header Buttons Area */}
                             <div className="absolute top-3 right-3 flex items-center gap-1 z-20">
@@ -1830,12 +1926,6 @@ cardsData.forEach(card => {
                             className="absolute inset-0 w-full h-full bg-zinc-50 dark:bg-zinc-800 rounded-2xl shadow-xl border border-zinc-200 dark:border-zinc-700 flex flex-col p-6 sm:p-8 text-center transition-colors duration-300"
                             style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', transform: 'rotateY(180deg)', WebkitTransform: 'rotateY(180deg)' }} // Safari Fix
                             >
-                            {/* Review Indicator */}
-                            {currentCard.isReview && (
-                                <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300 text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider flex items-center gap-1 z-10">
-                                    <RefreshCw size={10} /> Review
-                                </div>
-                            )}
                             
                             {/* Header Buttons Area */}
                             <div className="absolute top-3 right-3 flex items-center gap-1 z-20">
